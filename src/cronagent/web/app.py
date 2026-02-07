@@ -890,8 +890,14 @@ def get_dashboard_html() -> str:
                                         </p>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button @click="triggerJob(job.id)" class="p-2 hover:bg-gray-700 rounded-lg transition" title="Run now">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <button @click="triggerJob(job.id)" :disabled="runningJobs && runningJobs[job.id]" class="p-2 hover:bg-gray-700 rounded-lg transition disabled:opacity-50" title="Run now">
+                                            <!-- Spinner when running -->
+                                            <svg x-show="runningJobs && runningJobs[job.id]" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                            </svg>
+                                            <!-- Play icon when not running -->
+                                            <svg x-show="!runningJobs || !runningJobs[job.id]" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                                             </svg>
@@ -1048,6 +1054,7 @@ function dashboard() {
         // History
         runs: [],
         selectedRun: null,
+        runningJobs: {},
 
         // WebSocket
         ws: null,
@@ -1173,8 +1180,44 @@ function dashboard() {
         },
 
         async triggerJob(id) {
-            await fetch(`/api/jobs/${id}/trigger`, { method: 'POST' });
-            this.loadRuns();
+            // Mark job as running
+            if (!this.runningJobs) this.runningJobs = {};
+            this.runningJobs[id] = true;
+
+            // Show notification
+            this.showNotification('Job started', 'info');
+
+            try {
+                const res = await fetch(`/api/jobs/${id}/trigger`, { method: 'POST' });
+                const result = await res.json();
+
+                if (result.success) {
+                    this.showNotification('Job completed successfully!', 'success');
+                } else {
+                    this.showNotification('Job failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                this.showNotification('Job execution error', 'error');
+            } finally {
+                this.runningJobs[id] = false;
+                this.loadRuns();
+                this.loadJobs();
+            }
+        },
+
+        showNotification(message, type = 'info') {
+            // Create and show a toast notification
+            const toast = document.createElement('div');
+            toast.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 transition-all transform ${
+                type === 'success' ? 'bg-green-600' :
+                type === 'error' ? 'bg-red-600' : 'bg-indigo-600'
+            } text-white`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
         },
 
         async deleteJob(id) {

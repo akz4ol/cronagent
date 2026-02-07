@@ -1,0 +1,200 @@
+{
+  "date": "2026-02-07",
+  "timestamp": "2026-02-07T17:05:00.000000",
+  "homepage_latest_news": {
+    "total_articles": 12,
+    "recent_articles_24h": 12,
+    "articles": [
+      {
+        "id": 1,
+        "title": "Renewable Energy Breakthroughs Signal Major Shift Toward Clean Future",
+        "category": "environment",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "72%",
+        "slug": "renewable-energy-breakthroughs-signal-major-shift-toward-cle",
+        "url": "https://meridainpost.com/renewable-energy-breakthroughs-signal-major-shift-toward-cle",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 2,
+        "title": "EPA Advances Climate Regulations Despite Policy Rollbacks Under Trump",
+        "category": "environment",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "87%",
+        "slug": "epa-advances-climate-regulations-despite-policy-rollbacks-un",
+        "url": "https://meridainpost.com/epa-advances-climate-regulations-despite-policy-rollbacks-un",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 3,
+        "title": "CDC Genomic Surveillance Program Reaches 1 Million Participants Milestone",
+        "category": "health",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "92%",
+        "slug": "cdc-genomic-surveillance-program-reaches-1-million-participa",
+        "url": "https://meridainpost.com/cdc-genomic-surveillance-program-reaches-1-million-participa",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 4,
+        "title": "Medical Breakthroughs Transform Treatment Across Multiple Diseases",
+        "category": "health",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "72%",
+        "slug": "medical-breakthroughs-transform-treatment-across-multiple-di",
+        "url": "https://meridainpost.com/medical-breakthroughs-transform-treatment-across-multiple-di",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 5,
+        "title": "Global Humanitarian Needs Reach 239 Million People as Crises Intensify",
+        "category": "world",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "65%",
+        "slug": "global-humanitarian-needs-reach-239-million-people-as-crises",
+        "url": "https://meridainpost.com/global-humanitarian-needs-reach-239-million-people-as-crises",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 6,
+        "title": "Global Security Architecture Shifts as Olympics Open Amid Geopolitical Turmoil",
+        "category": "world",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "75%",
+        "slug": "global-security-architecture-shifts-as-olympics-open-amid-ge",
+        "url": "https://meridainpost.com/global-security-architecture-shifts-as-olympics-open-amid-ge",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 7,
+        "title": "Major M&A Activity Spans $50B+ in Deals Across Tech, Healthcare, Telecom",
+        "category": "business",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "72%",
+        "slug": "major-m-a-activity-spans-50b-in-deals-across-tech-healthcare",
+        "url": "https://meridainpost.com/major-m-a-activity-spans-50b-in-deals-across-tech-healthcare",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 8,
+        "title": "Global Economy Shows Resilience Despite Slowing Growth Ahead",
+        "category": "business",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "78%",
+        "slug": "global-economy-shows-resilience-despite-slowing-growth-ahead",
+        "url": "https://meridainpost.com/global-economy-shows-resilience-despite-slowing-growth-ahead",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 9,
+        "title": "2026 Poised to Mark Historic Return to Moon as Global Space Race Intensifies",
+        "category": "science",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "78%",
+        "slug": "2026-poised-to-mark-historic-return-to-moon-as-global-space-",
+        "url": "https://meridainpost.com/2026-poised-to-mark-historic-return-to-moon-as-global-space-",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 10,
+        "title": "Major Scientific Breakthroughs Reshape Medicine, Computing in 2025",
+        "category": "science",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "75%",
+        "slug": "major-scientific-breakthroughs-reshape-medicine-computing-in",
+        "url": "https://meridainpost.com/major-scientific-breakthroughs-reshape-medicine-computing-in",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 11,
+        "title": "Cybersecurity Breaches Surge 60% in 2023, Major Organizations Hit",
+        "category": "tech",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "55%",
+        "slug": "cybersecurity-breaches-surge-60-in-2023-major-organizations-",
+        "url": "https://meridainpost.com/cybersecurity-breaches-surge-60-in-2023-major-organizations-",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      },
+      {
+        "id": 12,
+        "title": "Amazon Defends $200B AI Spending as Tech Giants Face Investor Scrutiny",
+        "category": "tech",
+        "timestamp": "~5 hrs ago",
+        "credibility_score": "88%",
+        "slug": "amazon-defends-200b-ai-spending-as-tech-giants-face-investor",
+        "url": "https://meridainpost.com/amazon-defends-200b-ai-spending-as-tech-giants-face-investor",
+        "publication_date": "2026-02-07",
+        "is_recent_24h": true
+      }
+    ],
+    "categories": ["environment", "health", "world", "business", "science", "tech"],
+    "fetch_timestamp": "2026-02-07T17:05:00.000000"
+  },
+  "meridain_daily_podcasts": {
+    "latest_episode": 25,
+    "latest_episode_date": "2026-02-06",
+    "episodes": [
+      {
+        "episode_number": 25,
+        "date": "2026-02-06",
+        "title": "MeridAIn Daily - Feb 6, 2026",
+        "duration": "9:05",
+        "audio_url": "https://23inrhmnsixzlkd4.public.blob.vercel-storage.com/meridain-daily/audio/ep25_2026-02-06.mp3",
+        "is_today": false,
+        "url": "/meridain-daily/4616d13b-9f97-4bba-94c9-a85127670daf"
+      },
+      {
+        "episode_number": 24,
+        "date": "2026-02-05",
+        "title": "MeridAIn Daily - Feb 5, 2026",
+        "duration": "8:47",
+        "audio_url": "https://23inrhmnsixzlkd4.public.blob.vercel-storage.com/meridain-daily/audio/ep24_2026-02-05.mp3",
+        "is_today": false,
+        "url": "/meridain-daily/ep24-feb5-2026"
+      },
+      {
+        "episode_number": 23,
+        "date": "2026-02-04",
+        "title": "MeridAIn Daily - Feb 4, 2026",
+        "duration": "8:52",
+        "audio_url": "https://23inrhmnsixzlkd4.public.blob.vercel-storage.com/meridain-daily/audio/ep23_2026-02-04.mp3",
+        "is_today": false,
+        "url": "/meridain-daily/ep23-feb4-2026"
+      },
+      {
+        "episode_number": 22,
+        "date": "2026-02-03",
+        "title": "MeridAIn Daily - Feb 3, 2026",
+        "duration": "9:12",
+        "audio_url": "https://23inrhmnsixzlkd4.public.blob.vercel-storage.com/meridain-daily/audio/ep22_2026-02-03.mp3",
+        "is_today": false,
+        "url": "/meridain-daily/ep22-feb3-2026"
+      },
+      {
+        "episode_number": 21,
+        "date": "2026-02-02",
+        "title": "MeridAIn Daily - Feb 2, 2026",
+        "duration": "8:34",
+        "audio_url": "https://23inrhmnsixzlkd4.public.blob.vercel-storage.com/meridain-daily/audio/ep21_2026-02-02.mp3",
+        "is_today": false,
+        "url": "/meridain-daily/ep21-feb2-2026"
+      }
+    ],
+    "total_episodes": 5,
+    "todays_episodes": [],
+    "has_todays_episode": false,
+    "fetch_timestamp": "2026-02-07T17:05:00.000000",
+    "notes": "Latest episode: 25 from 2026-02-06. Today's date: 2026-02-07. No episode published today yet."
+  }
+}
