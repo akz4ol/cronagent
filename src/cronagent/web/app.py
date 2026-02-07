@@ -742,7 +742,7 @@ def get_dashboard_html() -> str:
                         </svg>
                         Claude Code CLI detected!
                     </div>
-                    <p class="text-sm text-gray-300 mb-3">Use your existing Claude subscription - no API costs.</p>
+                    <p class="text-sm text-gray-300 mb-3">Uses your claude.ai account credits (OAuth login).</p>
                     <button @click="skipApiKey()"
                         class="w-full bg-green-600 hover:bg-green-700 rounded-lg py-3 font-medium transition">
                         Use CLI Mode (Recommended)
@@ -844,9 +844,10 @@ def get_dashboard_html() -> str:
             <div class="p-4 border-t border-gray-700">
                 <div class="flex items-center gap-2 text-sm">
                     <span class="w-2 h-2 rounded-full" :class="status.ready ? 'bg-green-500' : 'bg-red-500'"></span>
-                    <span x-text="status.ready ? (status.mode === 'cli' ? 'CLI Mode (Free)' : 'API Mode') : 'Not configured'"></span>
+                    <span x-text="status.ready ? (status.mode === 'cli' ? 'CLI Mode' : 'API Mode') : 'Not configured'"></span>
                 </div>
-                <div x-show="status.mode === 'cli'" class="text-xs text-gray-500 mt-1">Using your subscription</div>
+                <div x-show="status.mode === 'cli'" class="text-xs text-gray-500 mt-1">Uses claude.ai credits</div>
+                <div x-show="status.mode === 'sdk'" class="text-xs text-gray-500 mt-1">Uses API credits</div>
             </div>
         </div>
 
