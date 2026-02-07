@@ -208,11 +208,11 @@ def create_app() -> FastAPI:
     async def list_jobs():
         """List all scheduled jobs."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
             store = JobStore(db)
@@ -245,7 +245,7 @@ def create_app() -> FastAPI:
     async def create_job(job: JobCreate):
         """Create a new job."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.job import (
                 ClaudePromptExecution,
                 CronSchedule,
@@ -257,7 +257,7 @@ def create_app() -> FastAPI:
             from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
             store = JobStore(db)
@@ -296,11 +296,11 @@ def create_app() -> FastAPI:
     async def trigger_job(job_id: str):
         """Manually trigger a job."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.scheduler import SchedulerService
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
 
@@ -323,11 +323,11 @@ def create_app() -> FastAPI:
     async def delete_job(job_id: str):
         """Delete a job."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
             store = JobStore(db)
@@ -352,11 +352,11 @@ def create_app() -> FastAPI:
     async def list_runs(job_id: str | None = None, limit: int = 50):
         """List job runs (audit log)."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
             store = JobStore(db)
@@ -389,11 +389,11 @@ def create_app() -> FastAPI:
     async def get_run(run_id: str):
         """Get detailed run information."""
         try:
-            from cronagent.config import load_config
+            from cronagent.config import CronAgentConfig
             from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
-            config = load_config()
+            config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
             store = JobStore(db)
