@@ -179,18 +179,50 @@ def create_app() -> FastAPI:
     # Chat / Agent Interaction
     # ============================================================
 
+    def detect_schedule_intent(message: str) -> dict[str, Any] | None:
+        """Detect if message is asking to schedule a task. Returns schedule info if detected."""
+        import re
+        message_lower = message.lower()
+
+        # Common scheduling keywords
+        schedule_patterns = [
+            r"schedule\s+(?:a\s+)?(.+?)(?:\s+(?:every|at|daily|weekly|hourly|monthly))",
+            r"(?:run|execute)\s+(?:a\s+)?(.+?)(?:\s+every\s+)",
+            r"(?:every|at)\s+(day|hour|week|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+            r"(?:daily|weekly|hourly|monthly)\s+(.+)",
+            r"create\s+(?:a\s+)?(?:scheduled\s+)?(?:job|task)\s+(?:to\s+)?(.+)",
+        ]
+
+        for pattern in schedule_patterns:
+            if re.search(pattern, message_lower):
+                return {"detected": True, "message": message}
+        return None
+
     @app.post("/api/chat")
     async def chat(msg: ChatMessage):
-        """Send a message to the agent."""
+        """Send a message to the agent. Automatically detects and creates scheduled jobs."""
         logger.info(f"Chat request received: {msg.message[:50]}...")
 
         if not os.environ.get("ANTHROPIC_API_KEY"):
             logger.error("API key not configured")
             raise HTTPException(400, "API key not configured")
 
+        # Check if this is a scheduling request
+        schedule_intent = detect_schedule_intent(msg.message)
+        job_created = None
+
+        if schedule_intent:
+            # Try to create a job from the request
+            job_created = await try_create_job_from_chat(msg.message)
+
         try:
             from cronagent.agent import AgentLoop, AgentLoopConfig
             from cronagent.bus.events import EventBus
+
+            # Enhance prompt with job context if job was created
+            prompt = msg.message
+            if job_created:
+                prompt = f"{msg.message}\n\n[System: A scheduled job '{job_created['name']}' was just created with ID '{job_created['id']}'. Acknowledge this to the user and explain what will happen.]"
 
             event_bus = EventBus()
             config = AgentLoopConfig()
@@ -201,9 +233,9 @@ def create_app() -> FastAPI:
             event_count = 0
 
             logger.info("Starting agent execution...")
-            async for event in agent.execute(msg.message):
+            async for event in agent.execute(prompt):
                 event_count += 1
-                logger.info(f"Received event #{event_count}: type={event.type}, content_preview={str(event.content)[:100] if event.content else 'None'}")
+                logger.debug(f"Event #{event_count}: type={event.type}")
 
                 if event.type == "text":
                     response_parts.append(event.content)
@@ -222,15 +254,125 @@ def create_app() -> FastAPI:
 
             logger.info(f"Agent execution complete. Events: {event_count}, Response parts: {len(response_parts)}")
 
-            return {
+            response = {
                 "response": "".join(response_parts),
                 "tool_uses": tool_uses,
                 "timestamp": datetime.now().isoformat(),
             }
 
+            if job_created:
+                response["job_created"] = job_created
+
+            return response
+
         except Exception as e:
             logger.error(f"Chat error: {e}", exc_info=True)
             raise HTTPException(500, str(e))
+
+    async def try_create_job_from_chat(message: str) -> dict[str, Any] | None:
+        """Try to extract and create a job from a chat message."""
+        import re
+
+        message_lower = message.lower()
+
+        # Extract schedule pattern
+        cron = None
+        interval_minutes = None
+        hour = 9  # Default to 9 AM
+        minute = 0
+
+        # First, check for specific time
+        time_match = re.search(r"(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", message_lower)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2)) if time_match.group(2) else 0
+            if time_match.group(3) == "pm" and hour < 12:
+                hour += 12
+            elif time_match.group(3) == "am" and hour == 12:
+                hour = 0
+
+        # Now check frequency patterns
+        if re.search(r"\b(daily|every\s*day)\b", message_lower):
+            cron = f"{minute} {hour} * * *"
+        elif re.search(r"\b(hourly|every\s*hour)\b", message_lower):
+            interval_minutes = 60
+        elif re.search(r"\b(weekly|every\s*week)\b", message_lower):
+            cron = f"{minute} {hour} * * MON"
+        elif match := re.search(r"every\s*(\d+)\s*minutes?", message_lower):
+            interval_minutes = int(match.group(1))
+        elif match := re.search(r"every\s*(\d+)\s*hours?", message_lower):
+            interval_minutes = int(match.group(1)) * 60
+        elif time_match:
+            # Just a time specified, assume daily
+            cron = f"{minute} {hour} * * *"
+
+        if not cron and not interval_minutes:
+            return None
+
+        # Extract task description (remove scheduling keywords)
+        task = re.sub(
+            r"\b(schedule|run|execute|create|daily|weekly|hourly|monthly|every\s*\w+|at\s*\d+[:\d]*\s*(?:am|pm)?)\b",
+            "",
+            message,
+            flags=re.IGNORECASE,
+        ).strip()
+        task = re.sub(r"\s+", " ", task).strip(" .,;:")
+
+        if len(task) < 5:
+            task = message  # Use original if extraction failed
+
+        # Create job name
+        words = task.split()[:5]
+        name = " ".join(words).title()
+        if len(name) > 50:
+            name = name[:47] + "..."
+
+        try:
+            from cronagent.config import CronAgentConfig
+            from cronagent.cron.job import (
+                ClaudePromptExecution,
+                CronSchedule,
+                ExecutionType,
+                IntervalSchedule,
+                JobDefinition,
+                ScheduleType,
+            )
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = CronAgentConfig.load()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            # Create job definition
+            if cron:
+                schedule_type = ScheduleType.CRON
+                schedule = CronSchedule(expression=cron)
+            else:
+                schedule_type = ScheduleType.INTERVAL
+                schedule = IntervalSchedule(minutes=interval_minutes)
+
+            job_def = JobDefinition(
+                name=name,
+                description=f"Created from chat: {message[:200]}",
+                schedule_type=schedule_type,
+                schedule=schedule,
+                execution_type=ExecutionType.CLAUDE_PROMPT,
+                execution=ClaudePromptExecution(prompt=task),
+            )
+
+            await store.add_job(job_def)
+            await db.close()
+
+            # Broadcast job creation
+            await broadcast({"type": "job_created", "job_id": job_def.id, "name": name})
+
+            return {"id": job_def.id, "name": name, "schedule": cron or f"every {interval_minutes} minutes"}
+
+        except Exception as e:
+            logger.error(f"Failed to create job from chat: {e}", exc_info=True)
+            return None
 
     # ============================================================
     # Jobs Management
@@ -250,25 +392,30 @@ def create_app() -> FastAPI:
             store = JobStore(db)
 
             jobs = await store.list_jobs()
-            await db.close()
 
-            return {
-                "jobs": [
-                    {
-                        "id": j.id,
-                        "name": j.name,
-                        "schedule_type": j.schedule_type.value,
-                        "enabled": j.enabled,
-                        "paused": j.paused,
-                        "last_run": j.last_run_at.isoformat() if j.last_run_at else None,
-                        "last_status": j.last_run_status,
-                        "run_count": j.run_count,
-                        "success_count": j.success_count,
-                        "failure_count": j.failure_count,
-                    }
-                    for j in jobs
-                ]
-            }
+            # Get run stats for each job
+            job_list = []
+            for j in jobs:
+                # Get run stats from store
+                stats = await store.get_job_stats(j.id)
+                job_list.append({
+                    "id": j.id,
+                    "name": j.name,
+                    "description": j.description,
+                    "schedule_type": j.schedule_type.value,
+                    "enabled": j.enabled,
+                    "paused": j.paused,
+                    "created_at": j.created_at.isoformat() if j.created_at else None,
+                    "last_run": stats.get("last_run_at"),
+                    "last_status": stats.get("last_status"),
+                    "run_count": stats.get("run_count", 0),
+                    "success_count": stats.get("success_count", 0),
+                    "failure_count": stats.get("failure_count", 0),
+                })
+
+            await db.close()
+            return {"jobs": job_list}
+
         except Exception as e:
             logger.error(f"List jobs error: {e}", exc_info=True)
             return {"jobs": [], "error": str(e)}
@@ -326,27 +473,79 @@ def create_app() -> FastAPI:
 
     @app.post("/api/jobs/{job_id}/trigger")
     async def trigger_job(job_id: str):
-        """Manually trigger a job."""
+        """Manually trigger a job and execute it."""
         try:
+            from cronagent.agent import AgentLoop, AgentLoopConfig
+            from cronagent.bus.events import EventBus
             from cronagent.config import CronAgentConfig
-            from cronagent.cron.scheduler import SchedulerService
+            from cronagent.cron.job import ExecutionType, JobStatus
+            from cronagent.cron.store import JobStore
             from cronagent.storage.database import Database
 
             config = CronAgentConfig.load()
             db = Database.from_config(config.memory)
             await db.initialize()
+            store = JobStore(db)
 
-            scheduler = SchedulerService(db, config.scheduler)
-            run_id = await scheduler.trigger_job(job_id, triggered_by="web")
-
-            await db.close()
-
-            if run_id:
-                await broadcast({"type": "job_triggered", "job_id": job_id, "run_id": run_id})
-                return {"success": True, "run_id": run_id}
-            else:
+            # Get job
+            job = await store.get_job(job_id)
+            if not job:
+                await db.close()
                 raise HTTPException(404, "Job not found")
 
+            # Create run record
+            run_id = await store.create_run(job_id, triggered_by="web")
+            await store.start_run(run_id)
+
+            # Broadcast start
+            await broadcast({"type": "job_started", "job_id": job_id, "run_id": run_id})
+
+            try:
+                # Execute based on type
+                if job.execution_type == ExecutionType.CLAUDE_PROMPT:
+                    event_bus = EventBus()
+                    agent_config = AgentLoopConfig(
+                        working_directory=job.execution.project_path or ".",
+                        model=getattr(job.execution, 'model', 'claude-sonnet-4-20250514'),
+                    )
+                    agent = AgentLoop(agent_config, event_bus=event_bus)
+
+                    # Execute and collect output
+                    output_parts = []
+                    cost_usd = 0.0
+                    async for event in agent.execute(job.execution.prompt):
+                        if event.type == "text":
+                            output_parts.append(event.content)
+                            await broadcast({
+                                "type": "job_output",
+                                "job_id": job_id,
+                                "run_id": run_id,
+                                "content": event.content,
+                            })
+                        elif event.type == "result":
+                            cost_usd = event.metadata.get("cost_usd", 0)
+
+                    output = "".join(output_parts)
+                    await store.complete_run(run_id, JobStatus.SUCCESS, output=output, cost_usd=cost_usd)
+
+                    await broadcast({"type": "job_completed", "job_id": job_id, "run_id": run_id, "status": "success"})
+                    await db.close()
+                    return {"success": True, "run_id": run_id, "output": output[:500], "status": "success"}
+
+                else:
+                    await store.complete_run(run_id, JobStatus.FAILURE, error="Execution type not supported in web trigger")
+                    await db.close()
+                    raise HTTPException(400, "Only Claude prompt jobs can be triggered from web")
+
+            except Exception as exec_error:
+                logger.error(f"Job execution error: {exec_error}", exc_info=True)
+                await store.complete_run(run_id, JobStatus.FAILURE, error=str(exec_error))
+                await broadcast({"type": "job_completed", "job_id": job_id, "run_id": run_id, "status": "failure"})
+                await db.close()
+                return {"success": False, "run_id": run_id, "error": str(exec_error), "status": "failure"}
+
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Trigger job error: {e}", exc_info=True)
             raise HTTPException(500, str(e))

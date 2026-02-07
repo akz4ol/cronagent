@@ -687,11 +687,13 @@ async def _add_job(
     from cronagent.cron.job import (
         ClaudePromptExecution,
         CronSchedule,
+        ExecutionType,
         IntervalSchedule,
         JobDefinition,
         NotificationConfig,
         OneTimeSchedule,
         RetryConfig,
+        ScheduleType,
         ScriptExecution,
         WebhookExecution,
     )
@@ -705,39 +707,46 @@ async def _add_job(
 
         # Build schedule
         if cron_expr:
+            schedule_type = ScheduleType.CRON
             schedule = CronSchedule(expression=cron_expr)
         elif interval:
+            schedule_type = ScheduleType.INTERVAL
             schedule = IntervalSchedule(seconds=int(interval))
         else:
+            schedule_type = ScheduleType.ONE_TIME
             schedule = OneTimeSchedule(run_at=datetime.fromisoformat(run_at))
 
         # Build execution
         if prompt:
+            execution_type = ExecutionType.CLAUDE_PROMPT
             execution = ClaudePromptExecution(prompt=prompt)
         elif script:
+            execution_type = ExecutionType.SCRIPT
             execution = ScriptExecution(command=script)
         else:
+            execution_type = ExecutionType.WEBHOOK
             execution = WebhookExecution(url=webhook)
 
         # Build notification config
         notification_config = NotificationConfig(
-            on_failure=True,
-            on_success=False,
-            channels=notify if notify else None,
+            on_failure=notify if notify else [],
+            on_success=[],
         )
 
         # Create job definition
         job = JobDefinition(
             id=job_id,
             name=name,
+            schedule_type=schedule_type,
             schedule=schedule,
+            execution_type=execution_type,
             execution=execution,
             retry=RetryConfig(),
             notifications=notification_config,
         )
 
         # Save to store
-        await store.create_job(job)
+        await store.add_job(job)
 
         console.print(f"[green]Job '{name}' ({job_id}) created successfully![/green]")
 
