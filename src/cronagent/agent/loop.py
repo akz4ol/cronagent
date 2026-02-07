@@ -227,7 +227,9 @@ class AgentLoop:
             effective_prompt = await self._build_enhanced_prompt(prompt)
 
         # Determine execution mode: CLI (OAuth) vs SDK (API key)
-        use_cli = self.config.use_cli and not os.environ.get("ANTHROPIC_API_KEY")
+        # Prefer CLI mode when available (uses subscription, no API costs)
+        cli_available = shutil.which("claude") is not None
+        use_cli = self.config.use_cli and cli_available
 
         # Execute query
         result_text = ""
@@ -328,47 +330,54 @@ class AgentLoop:
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
 
-        if self.config.permission_mode == "acceptEdits":
-            cmd.append("--dangerously-skip-permissions")
+        # Note: --dangerously-skip-permissions may not work in all contexts
+        # For scheduled jobs, we rely on the user having pre-approved permissions
 
         if self.config.max_turns:
             cmd.extend(["--max-turns", str(self.config.max_turns)])
 
-        logger.info(f"Running CLI: {' '.join(cmd[:4])}...")
+        logger.info(f"Running CLI command: {cmd}")
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
                 cwd=self.config.working_directory,
             )
 
             session_id = None
-            buffer = ""
+            result_text = ""
 
             # Read stdout line by line
-            while True:
-                line = await process.stdout.readline()
+            async for line_bytes in process.stdout:
+                line = line_bytes.decode().strip()
                 if not line:
-                    break
+                    continue
+
+                logger.debug(f"CLI output: {line[:200]}")
 
                 try:
-                    data = json.loads(line.decode().strip())
+                    data = json.loads(line)
                 except json.JSONDecodeError:
+                    logger.warning(f"Non-JSON line from CLI: {line[:100]}")
                     continue
 
                 msg_type = data.get("type")
 
                 if msg_type == "system" and data.get("subtype") == "init":
                     session_id = data.get("session_id")
+                    logger.info(f"CLI session started: {session_id}")
 
                 elif msg_type == "assistant":
                     # Text content from assistant
                     content = data.get("message", {}).get("content", [])
                     for block in content:
                         if block.get("type") == "text":
-                            yield AgentEvent(type="text", content=block.get("text", ""))
+                            text = block.get("text", "")
+                            if text:
+                                result_text += text
+                                yield AgentEvent(type="text", content=text)
                         elif block.get("type") == "tool_use":
                             yield AgentEvent(
                                 type="tool_use",
@@ -377,6 +386,12 @@ class AgentLoop:
                             )
 
                 elif msg_type == "result":
+                    # Get result text from the result message if we didn't capture it
+                    if not result_text:
+                        result_text = data.get("result", "")
+                        if result_text:
+                            yield AgentEvent(type="text", content=result_text)
+
                     yield AgentEvent(
                         type="result",
                         metadata={
@@ -384,12 +399,12 @@ class AgentLoop:
                             "is_error": data.get("is_error", False),
                             "session_id": session_id,
                             "duration_ms": data.get("duration_ms", 0),
-                            # No cost for CLI mode - uses subscription
-                            "cost_usd": 0,
+                            "cost_usd": data.get("total_cost_usd", 0),
                         },
                     )
 
             await process.wait()
+            logger.info(f"CLI process completed with return code: {process.returncode}")
 
         except Exception as e:
             logger.error(f"CLI execution error: {e}", exc_info=True)

@@ -112,11 +112,14 @@ def create_app() -> FastAPI:
         # Ready if: CLI available (OAuth) OR API key set
         ready = cli_available or api_key_set
 
+        # Prefer CLI mode when available (uses subscription, no API costs)
+        mode = "cli" if cli_available else ("sdk" if api_key_set else "none")
+
         return {
             "status": "running",
             "api_key_configured": api_key_set,
             "cli_available": cli_available,
-            "mode": "cli" if (cli_available and not api_key_set) else "sdk",
+            "mode": mode,
             "ready": ready,
             "permissions_granted": PERMISSIONS_GRANTED,
             "timestamp": datetime.now().isoformat(),
