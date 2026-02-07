@@ -1027,6 +1027,8 @@ def get_dashboard_html() -> str:
                     <div class="flex flex-wrap gap-4 text-sm text-gray-400">
                         <span>Run ID: <span class="text-white" x-text="jobResult.runId"></span></span>
                         <span>Time: <span class="text-white" x-text="jobResult.timestamp"></span></span>
+                        <span x-show="jobResult.duration">Duration: <span class="text-white" x-text="jobResult.duration"></span></span>
+                        <span x-show="jobResult.cost">Cost: <span class="text-white" x-text="jobResult.cost"></span></span>
                     </div>
 
                     <!-- Output Section -->
@@ -1315,12 +1317,33 @@ function dashboard() {
 
         async viewRun(id) {
             const res = await fetch(`/api/runs/${id}`);
-            this.selectedRun = await res.json();
+            const run = await res.json();
+
+            // Find job name
+            const job = this.jobs.find(j => j.id === run.job_id);
+            const jobName = job ? job.name : run.job_id;
+
+            // Show in the nice result modal
+            this.jobResult = {
+                jobName: jobName,
+                jobId: run.job_id,
+                success: run.status === 'success',
+                status: run.status,
+                output: run.output,
+                error: run.error,
+                runId: id,
+                timestamp: run.started_at ? new Date(run.started_at).toLocaleString() : '-',
+                duration: run.duration_ms ? (run.duration_ms / 1000).toFixed(1) + 's' : null,
+                cost: run.cost_usd ? '$' + run.cost_usd.toFixed(4) : null
+            };
         },
 
         async viewFullRun(id) {
-            this.jobResult = null;  // Close job result modal
-            await this.viewRun(id);  // Open full run details
+            // Already showing the nice modal, just keep it open
+            // This is called from the job result modal to view full details
+            const res = await fetch(`/api/runs/${id}`);
+            this.selectedRun = await res.json();
+            this.jobResult = null;  // Switch to detailed view
         },
 
         formatMarkdown(text) {
