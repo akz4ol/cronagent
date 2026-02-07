@@ -79,7 +79,10 @@ cronagent reload            # Apply changes
 ## 🚀 Quick Start
 
 ```bash
-# Chat with the agent
+# Start the web dashboard (easiest!)
+cronagent web --open
+
+# Or use CLI: Chat with agent
 cronagent agent
 
 # Run a single task
@@ -88,6 +91,25 @@ cronagent run "Analyze this codebase"
 # Start scheduled tasks
 cronagent daemon
 ```
+
+## 🖥 Web Dashboard
+
+Beautiful web interface - no terminal needed!
+
+```bash
+cronagent web --open
+```
+
+<div align="center">
+<img src="docs/assets/dashboard-preview.png" width="700" alt="Dashboard Preview">
+</div>
+
+**Features:**
+- Chat with the agent in real-time
+- Create and manage scheduled jobs
+- View full audit log of all actions
+- One-time permission setup, then auto-mode
+- Real-time status updates via WebSocket
 
 ---
 

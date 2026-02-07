@@ -348,6 +348,34 @@ def daemon(ctx: click.Context, foreground: bool) -> None:
     asyncio.run(_run_daemon(config))
 
 
+@main.command()
+@click.option("--host", "-h", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", "-p", default=8080, help="Port to bind to")
+@click.option("--open", "-o", "open_browser", is_flag=True, help="Open browser automatically")
+@click.pass_context
+def web(ctx: click.Context, host: str, port: int, open_browser: bool) -> None:
+    """Start the web dashboard."""
+    import webbrowser
+
+    from cronagent.web import run_dashboard
+
+    url = f"http://{'localhost' if host == '0.0.0.0' else host}:{port}"
+
+    console.print(
+        Panel(
+            f"[bold]CronAgent Web Dashboard[/bold]\n"
+            f"Open [link={url}]{url}[/link] in your browser\n"
+            f"Press Ctrl+C to stop.",
+            title="Web Mode",
+        )
+    )
+
+    if open_browser:
+        webbrowser.open(url)
+
+    run_dashboard(host=host, port=port)
+
+
 async def _run_daemon(config: CronAgentConfig) -> None:
     """Run the scheduler daemon."""
     from cronagent.bus.events import EventBus

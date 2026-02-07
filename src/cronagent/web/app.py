@@ -1,0 +1,970 @@
+"""
+FastAPI web application for CronAgent dashboard.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import secrets
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+# Store for active WebSocket connections
+active_connections: list[WebSocket] = []
+
+# Simple token-based auth (stored in memory, persisted to file)
+AUTH_TOKEN: str | None = None
+PERMISSIONS_GRANTED = False
+
+
+class ChatMessage(BaseModel):
+    message: str
+
+
+class JobCreate(BaseModel):
+    name: str
+    cron: str | None = None
+    interval_minutes: int | None = None
+    prompt: str
+    notify: list[str] = []
+
+
+class PermissionGrant(BaseModel):
+    permissions: list[str]
+
+
+def create_app() -> FastAPI:
+    """Create the FastAPI application."""
+    app = FastAPI(
+        title="CronAgent Dashboard",
+        description="Web interface for CronAgent",
+        version="0.1.0",
+    )
+
+    # Get the directory of this file for static/template paths
+    web_dir = Path(__file__).parent
+    static_dir = web_dir / "static"
+
+    # Mount static files if directory exists
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # ============================================================
+    # Auth & Setup
+    # ============================================================
+
+    @app.get("/", response_class=HTMLResponse)
+    async def dashboard():
+        """Serve the main dashboard."""
+        return get_dashboard_html()
+
+    @app.get("/api/status")
+    async def get_status():
+        """Get current system status."""
+        global PERMISSIONS_GRANTED
+
+        # Check if API key is set
+        api_key_set = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+        # Check permissions file
+        config_dir = Path.home() / ".cronagent"
+        perm_file = config_dir / "permissions.json"
+        if perm_file.exists():
+            PERMISSIONS_GRANTED = True
+
+        return {
+            "status": "running",
+            "api_key_configured": api_key_set,
+            "permissions_granted": PERMISSIONS_GRANTED,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    @app.post("/api/setup")
+    async def setup_api_key(request: Request):
+        """Save API key to config."""
+        data = await request.json()
+        api_key = data.get("api_key", "").strip()
+
+        if not api_key:
+            raise HTTPException(400, "API key required")
+
+        # Save to api.txt
+        config_dir = Path.home() / ".cronagent"
+        config_dir.mkdir(exist_ok=True)
+
+        api_file = config_dir / "api.txt"
+
+        # Read existing content
+        existing = {}
+        if api_file.exists():
+            with open(api_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        existing[k.strip()] = v.strip()
+
+        # Update API key
+        existing["ANTHROPIC_API_KEY"] = api_key
+
+        # Write back
+        with open(api_file, "w") as f:
+            f.write("# CronAgent API Configuration\n\n")
+            for k, v in existing.items():
+                f.write(f"{k}={v}\n")
+
+        # Set in environment
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+
+        return {"success": True, "message": "API key saved"}
+
+    @app.post("/api/permissions")
+    async def grant_permissions(grant: PermissionGrant):
+        """Grant permissions (one-time setup)."""
+        global PERMISSIONS_GRANTED
+
+        config_dir = Path.home() / ".cronagent"
+        config_dir.mkdir(exist_ok=True)
+
+        perm_file = config_dir / "permissions.json"
+
+        permissions = {
+            "granted": True,
+            "permissions": grant.permissions,
+            "granted_at": datetime.now().isoformat(),
+            "auto_mode": True,
+        }
+
+        with open(perm_file, "w") as f:
+            json.dump(permissions, f, indent=2)
+
+        PERMISSIONS_GRANTED = True
+
+        return {"success": True, "message": "Permissions granted"}
+
+    # ============================================================
+    # Chat / Agent Interaction
+    # ============================================================
+
+    @app.post("/api/chat")
+    async def chat(msg: ChatMessage):
+        """Send a message to the agent."""
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise HTTPException(400, "API key not configured")
+
+        try:
+            from cronagent.agent import AgentLoop, AgentLoopConfig
+            from cronagent.bus.events import EventBus
+
+            event_bus = EventBus()
+            config = AgentLoopConfig()
+            agent = AgentLoop(config, event_bus=event_bus)
+
+            response_parts = []
+            tool_uses = []
+
+            async for event in agent.execute(msg.message):
+                if event.type == "text":
+                    response_parts.append(event.content)
+                elif event.type == "tool_use":
+                    tool_uses.append({
+                        "tool": event.metadata.get("tool"),
+                        "input": event.metadata.get("input"),
+                    })
+
+                # Broadcast to WebSocket clients
+                await broadcast({
+                    "type": "agent_event",
+                    "event": event.type,
+                    "content": event.content if hasattr(event, 'content') else None,
+                })
+
+            return {
+                "response": "".join(response_parts),
+                "tool_uses": tool_uses,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"Chat error: {e}", exc_info=True)
+            raise HTTPException(500, str(e))
+
+    # ============================================================
+    # Jobs Management
+    # ============================================================
+
+    @app.get("/api/jobs")
+    async def list_jobs():
+        """List all scheduled jobs."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            jobs = await store.list_jobs()
+            await db.close()
+
+            return {
+                "jobs": [
+                    {
+                        "id": j.id,
+                        "name": j.name,
+                        "schedule_type": j.schedule_type.value,
+                        "enabled": j.enabled,
+                        "paused": j.paused,
+                        "last_run": j.last_run_at.isoformat() if j.last_run_at else None,
+                        "last_status": j.last_run_status,
+                        "run_count": j.run_count,
+                        "success_count": j.success_count,
+                        "failure_count": j.failure_count,
+                    }
+                    for j in jobs
+                ]
+            }
+        except Exception as e:
+            logger.error(f"List jobs error: {e}", exc_info=True)
+            return {"jobs": [], "error": str(e)}
+
+    @app.post("/api/jobs")
+    async def create_job(job: JobCreate):
+        """Create a new job."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.job import (
+                ClaudePromptExecution,
+                CronSchedule,
+                ExecutionType,
+                IntervalSchedule,
+                JobDefinition,
+                ScheduleType,
+            )
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            # Determine schedule type
+            if job.cron:
+                schedule_type = ScheduleType.CRON
+                schedule = CronSchedule(job.cron)
+            elif job.interval_minutes:
+                schedule_type = ScheduleType.INTERVAL
+                schedule = IntervalSchedule(minutes=job.interval_minutes)
+            else:
+                raise HTTPException(400, "Either cron or interval_minutes required")
+
+            job_def = JobDefinition(
+                name=job.name,
+                schedule_type=schedule_type,
+                schedule=schedule,
+                execution_type=ExecutionType.CLAUDE_PROMPT,
+                execution=ClaudePromptExecution(prompt=job.prompt),
+            )
+
+            await store.add_job(job_def)
+            await db.close()
+
+            # Broadcast update
+            await broadcast({"type": "job_created", "job_id": job_def.id})
+
+            return {"success": True, "job_id": job_def.id}
+
+        except Exception as e:
+            logger.error(f"Create job error: {e}", exc_info=True)
+            raise HTTPException(500, str(e))
+
+    @app.post("/api/jobs/{job_id}/trigger")
+    async def trigger_job(job_id: str):
+        """Manually trigger a job."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.scheduler import SchedulerService
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+
+            scheduler = SchedulerService(db, config.scheduler)
+            run_id = await scheduler.trigger_job(job_id, triggered_by="web")
+
+            await db.close()
+
+            if run_id:
+                await broadcast({"type": "job_triggered", "job_id": job_id, "run_id": run_id})
+                return {"success": True, "run_id": run_id}
+            else:
+                raise HTTPException(404, "Job not found")
+
+        except Exception as e:
+            logger.error(f"Trigger job error: {e}", exc_info=True)
+            raise HTTPException(500, str(e))
+
+    @app.delete("/api/jobs/{job_id}")
+    async def delete_job(job_id: str):
+        """Delete a job."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            success = await store.delete_job(job_id)
+            await db.close()
+
+            if success:
+                await broadcast({"type": "job_deleted", "job_id": job_id})
+                return {"success": True}
+            else:
+                raise HTTPException(404, "Job not found")
+
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
+    # ============================================================
+    # Audit Logs / History
+    # ============================================================
+
+    @app.get("/api/runs")
+    async def list_runs(job_id: str | None = None, limit: int = 50):
+        """List job runs (audit log)."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            runs = await store.get_runs(job_id=job_id, limit=limit)
+            await db.close()
+
+            return {
+                "runs": [
+                    {
+                        "id": r.run_id,
+                        "job_id": r.job_id,
+                        "status": r.status.value,
+                        "started_at": r.started_at.isoformat() if r.started_at else None,
+                        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                        "duration_ms": r.duration_ms,
+                        "attempt": r.attempt,
+                        "triggered_by": r.triggered_by,
+                        "output": r.output[:500] if r.output else None,
+                        "error": r.error,
+                    }
+                    for r in runs
+                ]
+            }
+        except Exception as e:
+            logger.error(f"List runs error: {e}", exc_info=True)
+            return {"runs": [], "error": str(e)}
+
+    @app.get("/api/runs/{run_id}")
+    async def get_run(run_id: str):
+        """Get detailed run information."""
+        try:
+            from cronagent.config import load_config
+            from cronagent.cron.store import JobStore
+            from cronagent.storage.database import Database
+
+            config = load_config()
+            db = Database.from_config(config.memory)
+            await db.initialize()
+            store = JobStore(db)
+
+            run = await store.get_run(run_id)
+            await db.close()
+
+            if not run:
+                raise HTTPException(404, "Run not found")
+
+            return {
+                "id": run.run_id,
+                "job_id": run.job_id,
+                "status": run.status.value,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                "duration_ms": run.duration_ms,
+                "attempt": run.attempt,
+                "max_attempts": run.max_attempts,
+                "triggered_by": run.triggered_by,
+                "triggered_by_user": run.triggered_by_user,
+                "output": run.output,
+                "error": run.error,
+                "cost_usd": run.cost_usd,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
+    # ============================================================
+    # WebSocket for Real-time Updates
+    # ============================================================
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """WebSocket for real-time updates."""
+        await websocket.accept()
+        active_connections.append(websocket)
+
+        try:
+            while True:
+                # Keep connection alive, receive any messages
+                data = await websocket.receive_text()
+                # Echo back for ping/pong
+                if data == "ping":
+                    await websocket.send_text("pong")
+        except WebSocketDisconnect:
+            active_connections.remove(websocket)
+
+    return app
+
+
+async def broadcast(message: dict):
+    """Broadcast message to all WebSocket clients."""
+    for connection in active_connections:
+        try:
+            await connection.send_json(message)
+        except Exception:
+            pass
+
+
+def get_dashboard_html() -> str:
+    """Return the dashboard HTML."""
+    return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CronAgent Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .chat-container { height: calc(100vh - 200px); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .animate-pulse-slow { animation: pulse 2s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen" x-data="dashboard()">
+
+    <!-- Setup Modal -->
+    <div x-show="showSetup" x-cloak class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                </div>
+                <h2 class="text-2xl font-bold">Welcome to CronAgent</h2>
+                <p class="text-gray-400 mt-2">Let's get you set up in 30 seconds</p>
+            </div>
+
+            <!-- Step 1: API Key -->
+            <div x-show="setupStep === 1">
+                <label class="block text-sm font-medium mb-2">Anthropic API Key</label>
+                <input type="password" x-model="apiKey"
+                    class="w-full bg-gray-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="sk-ant-...">
+                <p class="text-xs text-gray-500 mt-2">
+                    Get your key from <a href="https://console.anthropic.com" target="_blank" class="text-indigo-400 hover:underline">console.anthropic.com</a>
+                </p>
+                <button @click="saveApiKey()" :disabled="!apiKey"
+                    class="w-full mt-4 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded-lg py-3 font-medium transition">
+                    Continue
+                </button>
+            </div>
+
+            <!-- Step 2: Permissions -->
+            <div x-show="setupStep === 2">
+                <p class="text-gray-300 mb-4">Grant these permissions once, then CronAgent runs in auto mode:</p>
+                <div class="space-y-3">
+                    <label class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600">
+                        <input type="checkbox" x-model="permissions.files" class="w-5 h-5 rounded text-indigo-500">
+                        <div>
+                            <div class="font-medium">Read & Write Files</div>
+                            <div class="text-sm text-gray-400">Edit code, create files</div>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600">
+                        <input type="checkbox" x-model="permissions.shell" class="w-5 h-5 rounded text-indigo-500">
+                        <div>
+                            <div class="font-medium">Run Commands</div>
+                            <div class="text-sm text-gray-400">Execute shell commands</div>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600">
+                        <input type="checkbox" x-model="permissions.network" class="w-5 h-5 rounded text-indigo-500">
+                        <div>
+                            <div class="font-medium">Network Access</div>
+                            <div class="text-sm text-gray-400">Make API calls, fetch data</div>
+                        </div>
+                    </label>
+                </div>
+                <button @click="grantPermissions()"
+                    class="w-full mt-4 bg-indigo-500 hover:bg-indigo-600 rounded-lg py-3 font-medium transition">
+                    Grant & Start Using
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div x-show="!showSetup" class="flex h-screen">
+
+        <!-- Sidebar -->
+        <div class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+            <div class="p-4 border-b border-gray-700">
+                <h1 class="text-xl font-bold flex items-center gap-2">
+                    <span class="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </span>
+                    CronAgent
+                </h1>
+            </div>
+
+            <nav class="flex-1 p-4 space-y-2">
+                <button @click="view = 'chat'" :class="view === 'chat' ? 'bg-gray-700' : 'hover:bg-gray-700'"
+                    class="w-full flex items-center gap-3 px-4 py-2 rounded-lg transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    Chat
+                </button>
+                <button @click="view = 'jobs'" :class="view === 'jobs' ? 'bg-gray-700' : 'hover:bg-gray-700'"
+                    class="w-full flex items-center gap-3 px-4 py-2 rounded-lg transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Jobs
+                    <span x-show="jobs.length" class="ml-auto bg-gray-600 text-xs px-2 py-0.5 rounded-full" x-text="jobs.length"></span>
+                </button>
+                <button @click="view = 'history'" :class="view === 'history' ? 'bg-gray-700' : 'hover:bg-gray-700'"
+                    class="w-full flex items-center gap-3 px-4 py-2 rounded-lg transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    History
+                </button>
+            </nav>
+
+            <!-- Status -->
+            <div class="p-4 border-t border-gray-700">
+                <div class="flex items-center gap-2 text-sm">
+                    <span class="w-2 h-2 rounded-full" :class="status.api_key_configured ? 'bg-green-500' : 'bg-red-500'"></span>
+                    <span x-text="status.api_key_configured ? 'Connected' : 'Not configured'"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col">
+
+            <!-- Chat View -->
+            <div x-show="view === 'chat'" class="flex-1 flex flex-col">
+                <div class="p-4 border-b border-gray-700">
+                    <h2 class="text-lg font-semibold">Chat with Agent</h2>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-4 space-y-4" id="chat-messages">
+                    <template x-for="msg in messages" :key="msg.id">
+                        <div :class="msg.role === 'user' ? 'ml-auto bg-indigo-500' : 'bg-gray-700'"
+                            class="max-w-2xl rounded-2xl px-4 py-3">
+                            <div class="text-sm opacity-60 mb-1" x-text="msg.role === 'user' ? 'You' : 'Agent'"></div>
+                            <div class="whitespace-pre-wrap" x-text="msg.content"></div>
+                            <div x-show="msg.tool_uses?.length" class="mt-2 text-xs opacity-60">
+                                <template x-for="tool in msg.tool_uses">
+                                    <span class="inline-block bg-gray-600 rounded px-2 py-1 mr-1" x-text="tool.tool"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="loading" class="flex items-center gap-2 text-gray-400">
+                        <div class="animate-pulse-slow">Thinking...</div>
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-gray-700">
+                    <form @submit.prevent="sendMessage()" class="flex gap-2">
+                        <input type="text" x-model="chatInput" :disabled="loading"
+                            class="flex-1 bg-gray-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="Ask the agent anything...">
+                        <button type="submit" :disabled="loading || !chatInput"
+                            class="bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded-lg px-6 py-3 font-medium transition">
+                            Send
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Jobs View -->
+            <div x-show="view === 'jobs'" class="flex-1 flex flex-col">
+                <div class="p-4 border-b border-gray-700 flex items-center justify-between">
+                    <h2 class="text-lg font-semibold">Scheduled Jobs</h2>
+                    <button @click="showNewJob = true" class="bg-indigo-500 hover:bg-indigo-600 rounded-lg px-4 py-2 text-sm font-medium transition">
+                        + New Job
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-4">
+                    <div x-show="jobs.length === 0" class="text-center text-gray-400 py-12">
+                        <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p>No jobs scheduled yet</p>
+                        <button @click="showNewJob = true" class="mt-4 text-indigo-400 hover:underline">Create your first job</button>
+                    </div>
+
+                    <div class="space-y-3">
+                        <template x-for="job in jobs" :key="job.id">
+                            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                                <div class="flex items-start justify-between">
+                                    <div>
+                                        <h3 class="font-semibold" x-text="job.name"></h3>
+                                        <p class="text-sm text-gray-400 mt-1">
+                                            <span x-text="job.schedule_type"></span> &bull;
+                                            <span x-text="job.run_count + ' runs'"></span> &bull;
+                                            <span :class="job.last_status === 'success' ? 'text-green-400' : job.last_status === 'failure' ? 'text-red-400' : ''"
+                                                x-text="job.last_status || 'Never run'"></span>
+                                        </p>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button @click="triggerJob(job.id)" class="p-2 hover:bg-gray-700 rounded-lg transition" title="Run now">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                            </svg>
+                                        </button>
+                                        <button @click="deleteJob(job.id)" class="p-2 hover:bg-gray-700 rounded-lg transition text-red-400" title="Delete">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History/Audit View -->
+            <div x-show="view === 'history'" class="flex-1 flex flex-col">
+                <div class="p-4 border-b border-gray-700">
+                    <h2 class="text-lg font-semibold">Run History & Audit Log</h2>
+                </div>
+
+                <div class="flex-1 overflow-y-auto">
+                    <table class="w-full">
+                        <thead class="bg-gray-800 sticky top-0">
+                            <tr class="text-left text-sm text-gray-400">
+                                <th class="p-4">Status</th>
+                                <th class="p-4">Job</th>
+                                <th class="p-4">Started</th>
+                                <th class="p-4">Duration</th>
+                                <th class="p-4">Trigger</th>
+                                <th class="p-4">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="run in runs" :key="run.id">
+                                <tr class="border-t border-gray-700 hover:bg-gray-800/50">
+                                    <td class="p-4">
+                                        <span :class="{
+                                            'bg-green-500/20 text-green-400': run.status === 'success',
+                                            'bg-red-500/20 text-red-400': run.status === 'failure',
+                                            'bg-yellow-500/20 text-yellow-400': run.status === 'running',
+                                            'bg-gray-500/20 text-gray-400': run.status === 'pending'
+                                        }" class="px-2 py-1 rounded text-xs font-medium" x-text="run.status"></span>
+                                    </td>
+                                    <td class="p-4 font-medium" x-text="run.job_id"></td>
+                                    <td class="p-4 text-sm text-gray-400" x-text="run.started_at ? new Date(run.started_at).toLocaleString() : '-'"></td>
+                                    <td class="p-4 text-sm" x-text="run.duration_ms ? (run.duration_ms / 1000).toFixed(1) + 's' : '-'"></td>
+                                    <td class="p-4 text-sm text-gray-400" x-text="run.triggered_by"></td>
+                                    <td class="p-4">
+                                        <button @click="viewRun(run.id)" class="text-indigo-400 hover:underline text-sm">View</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Job Modal -->
+    <div x-show="showNewJob" x-cloak class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl">
+            <h3 class="text-xl font-bold mb-4">Create New Job</h3>
+            <form @submit.prevent="createJob()">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Job Name</label>
+                        <input type="text" x-model="newJob.name" required
+                            class="w-full bg-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="Daily Security Scan">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Cron Schedule</label>
+                        <input type="text" x-model="newJob.cron"
+                            class="w-full bg-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="0 9 * * * (every day at 9am)">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Prompt</label>
+                        <textarea x-model="newJob.prompt" rows="4" required
+                            class="w-full bg-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="What should the agent do?"></textarea>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-6">
+                    <button type="button" @click="showNewJob = false"
+                        class="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 font-medium transition">Cancel</button>
+                    <button type="submit"
+                        class="flex-1 bg-indigo-500 hover:bg-indigo-600 rounded-lg py-2 font-medium transition">Create Job</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Run Detail Modal -->
+    <div x-show="selectedRun" x-cloak class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold">Run Details</h3>
+                <button @click="selectedRun = null" class="p-2 hover:bg-gray-700 rounded-lg">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <template x-if="selectedRun">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div><span class="text-gray-400">Status:</span> <span x-text="selectedRun.status"></span></div>
+                        <div><span class="text-gray-400">Job ID:</span> <span x-text="selectedRun.job_id"></span></div>
+                        <div><span class="text-gray-400">Started:</span> <span x-text="selectedRun.started_at"></span></div>
+                        <div><span class="text-gray-400">Duration:</span> <span x-text="selectedRun.duration_ms ? (selectedRun.duration_ms/1000) + 's' : '-'"></span></div>
+                        <div><span class="text-gray-400">Triggered by:</span> <span x-text="selectedRun.triggered_by"></span></div>
+                        <div><span class="text-gray-400">Cost:</span> <span x-text="selectedRun.cost_usd ? '$' + selectedRun.cost_usd.toFixed(4) : '-'"></span></div>
+                    </div>
+                    <div x-show="selectedRun.output">
+                        <div class="text-sm text-gray-400 mb-2">Output:</div>
+                        <pre class="bg-gray-900 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap" x-text="selectedRun.output"></pre>
+                    </div>
+                    <div x-show="selectedRun.error">
+                        <div class="text-sm text-red-400 mb-2">Error:</div>
+                        <pre class="bg-red-900/30 rounded-lg p-4 text-sm text-red-300" x-text="selectedRun.error"></pre>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+<script>
+function dashboard() {
+    return {
+        // State
+        showSetup: false,
+        setupStep: 1,
+        apiKey: '',
+        permissions: { files: true, shell: true, network: true },
+
+        view: 'chat',
+        status: { api_key_configured: false, permissions_granted: false },
+
+        // Chat
+        messages: [],
+        chatInput: '',
+        loading: false,
+
+        // Jobs
+        jobs: [],
+        showNewJob: false,
+        newJob: { name: '', cron: '', prompt: '' },
+
+        // History
+        runs: [],
+        selectedRun: null,
+
+        // WebSocket
+        ws: null,
+
+        async init() {
+            await this.checkStatus();
+            this.connectWebSocket();
+            this.loadJobs();
+            this.loadRuns();
+        },
+
+        async checkStatus() {
+            const res = await fetch('/api/status');
+            this.status = await res.json();
+
+            if (!this.status.api_key_configured) {
+                this.showSetup = true;
+                this.setupStep = 1;
+            } else if (!this.status.permissions_granted) {
+                this.showSetup = true;
+                this.setupStep = 2;
+            }
+        },
+
+        async saveApiKey() {
+            await fetch('/api/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: this.apiKey })
+            });
+            this.setupStep = 2;
+        },
+
+        async grantPermissions() {
+            const perms = Object.entries(this.permissions)
+                .filter(([k, v]) => v)
+                .map(([k]) => k);
+
+            await fetch('/api/permissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ permissions: perms })
+            });
+
+            this.showSetup = false;
+        },
+
+        connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            this.ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+            this.ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'job_created' || data.type === 'job_deleted') {
+                    this.loadJobs();
+                } else if (data.type === 'job_triggered') {
+                    this.loadRuns();
+                }
+            };
+
+            this.ws.onclose = () => {
+                setTimeout(() => this.connectWebSocket(), 3000);
+            };
+        },
+
+        async sendMessage() {
+            if (!this.chatInput.trim() || this.loading) return;
+
+            const msg = this.chatInput;
+            this.chatInput = '';
+            this.messages.push({ id: Date.now(), role: 'user', content: msg });
+            this.loading = true;
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+                const data = await res.json();
+
+                this.messages.push({
+                    id: Date.now(),
+                    role: 'assistant',
+                    content: data.response,
+                    tool_uses: data.tool_uses
+                });
+            } catch (e) {
+                this.messages.push({
+                    id: Date.now(),
+                    role: 'assistant',
+                    content: 'Error: ' + e.message
+                });
+            }
+
+            this.loading = false;
+            this.$nextTick(() => {
+                document.getElementById('chat-messages').scrollTop = 999999;
+            });
+        },
+
+        async loadJobs() {
+            const res = await fetch('/api/jobs');
+            const data = await res.json();
+            this.jobs = data.jobs || [];
+        },
+
+        async loadRuns() {
+            const res = await fetch('/api/runs');
+            const data = await res.json();
+            this.runs = data.runs || [];
+        },
+
+        async createJob() {
+            await fetch('/api/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.newJob)
+            });
+            this.showNewJob = false;
+            this.newJob = { name: '', cron: '', prompt: '' };
+            this.loadJobs();
+        },
+
+        async triggerJob(id) {
+            await fetch(`/api/jobs/${id}/trigger`, { method: 'POST' });
+            this.loadRuns();
+        },
+
+        async deleteJob(id) {
+            if (!confirm('Delete this job?')) return;
+            await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+            this.loadJobs();
+        },
+
+        async viewRun(id) {
+            const res = await fetch(`/api/runs/${id}`);
+            this.selectedRun = await res.json();
+        }
+    };
+}
+</script>
+</body>
+</html>'''
+
+
+def run_dashboard(host: str = "0.0.0.0", port: int = 8080):
+    """Run the dashboard server."""
+    import uvicorn
+    app = create_app()
+    uvicorn.run(app, host=host, port=port)

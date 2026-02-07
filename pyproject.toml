@@ -39,6 +39,9 @@ dependencies = [
     "rich>=13.0.0",
     "aiohttp>=3.9.0",
     "PyGithub>=2.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
@@ -73,9 +76,9 @@ all = [
 cronagent = "cronagent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourname/cronagent"
-Documentation = "https://cronagent.readthedocs.io"
-Repository = "https://github.com/yourname/cronagent"
+Homepage = "https://github.com/akz4ol/cronagent"
+Documentation = "https://akz4ol.github.io/cronagent"
+Repository = "https://github.com/akz4ol/cronagent"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cronagent"]
