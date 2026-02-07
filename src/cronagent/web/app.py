@@ -1334,8 +1334,8 @@ function dashboard() {
                 .replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold mt-4 mb-2">$1</h2>')
                 .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>')
                 .replace(/^- (.+)$/gm, '<li class="ml-4">$1</li>')
-                .replace(/\n\n/g, '</p><p class="mb-2">')
-                .replace(/\n/g, '<br>');
+                .replace(/\\n\\n/g, '</p><p class="mb-2">')
+                .replace(/\\n/g, '<br>');
         }
     };
 }
