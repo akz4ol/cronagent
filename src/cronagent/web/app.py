@@ -530,7 +530,7 @@ def create_app() -> FastAPI:
 
                     await broadcast({"type": "job_completed", "job_id": job_id, "run_id": run_id, "status": "success"})
                     await db.close()
-                    return {"success": True, "run_id": run_id, "output": output[:500], "status": "success"}
+                    return {"success": True, "run_id": run_id, "output": output, "status": "success"}
 
                 else:
                     await store.complete_run(run_id, JobStatus.FAILURE, error="Execution type not supported in web trigger")
@@ -995,6 +995,70 @@ def get_dashboard_html() -> str:
         </div>
     </div>
 
+    <!-- Job Result Modal - Shows immediately after job execution -->
+    <div x-show="jobResult" x-cloak class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @keydown.escape.window="jobResult = null">
+        <div class="bg-gray-800 rounded-2xl p-6 max-w-3xl w-full mx-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <!-- Status Icon -->
+                    <div :class="jobResult?.success ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'" class="p-2 rounded-full">
+                        <svg x-show="jobResult?.success" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                        <svg x-show="!jobResult?.success" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-xl font-bold" x-text="jobResult?.success ? 'Job Completed' : 'Job Failed'"></h3>
+                        <p class="text-sm text-gray-400" x-text="jobResult?.jobName"></p>
+                    </div>
+                </div>
+                <button @click="jobResult = null" class="p-2 hover:bg-gray-700 rounded-lg">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <template x-if="jobResult">
+                <div class="space-y-4">
+                    <!-- Meta info -->
+                    <div class="flex flex-wrap gap-4 text-sm text-gray-400">
+                        <span>Run ID: <span class="text-white" x-text="jobResult.runId"></span></span>
+                        <span>Time: <span class="text-white" x-text="jobResult.timestamp"></span></span>
+                    </div>
+
+                    <!-- Output Section -->
+                    <div x-show="jobResult.output" class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium text-gray-300">Agent Response</span>
+                            <button @click="navigator.clipboard.writeText(jobResult.output); showNotification('Copied!', 'success')"
+                                class="text-xs text-indigo-400 hover:text-indigo-300">Copy</button>
+                        </div>
+                        <div class="bg-gray-900 rounded-lg p-4 max-h-96 overflow-y-auto">
+                            <div class="prose prose-invert prose-sm max-w-none" x-html="formatMarkdown(jobResult.output)"></div>
+                        </div>
+                    </div>
+
+                    <!-- Error Section -->
+                    <div x-show="jobResult.error" class="space-y-2">
+                        <span class="text-sm font-medium text-red-400">Error</span>
+                        <pre class="bg-red-900/30 rounded-lg p-4 text-sm text-red-300 overflow-x-auto" x-text="jobResult.error"></pre>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-3 pt-4 border-t border-gray-700">
+                        <button @click="jobResult = null"
+                            class="flex-1 bg-gray-700 hover:bg-gray-600 rounded-lg py-2 font-medium transition">Close</button>
+                        <button @click="viewFullRun(jobResult.runId)"
+                            class="flex-1 bg-indigo-500 hover:bg-indigo-600 rounded-lg py-2 font-medium transition">View Full Details</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
     <!-- Run Detail Modal -->
     <div x-show="selectedRun" x-cloak class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
         <div class="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[80vh] overflow-y-auto">
@@ -1055,6 +1119,7 @@ function dashboard() {
         runs: [],
         selectedRun: null,
         runningJobs: {},
+        jobResult: null,  // For showing job output after execution
 
         // WebSocket
         ws: null,
@@ -1180,23 +1245,45 @@ function dashboard() {
         },
 
         async triggerJob(id) {
+            // Find job name
+            const job = this.jobs.find(j => j.id === id);
+            const jobName = job ? job.name : id;
+
             // Mark job as running
-            if (!this.runningJobs) this.runningJobs = {};
             this.runningJobs[id] = true;
 
             // Show notification
-            this.showNotification('Job started', 'info');
+            this.showNotification(`Running: ${jobName}...`, 'info');
 
             try {
                 const res = await fetch(`/api/jobs/${id}/trigger`, { method: 'POST' });
                 const result = await res.json();
 
+                // Show result in modal
+                this.jobResult = {
+                    jobName: jobName,
+                    jobId: id,
+                    success: result.success,
+                    status: result.status,
+                    output: result.output,
+                    error: result.error,
+                    runId: result.run_id,
+                    timestamp: new Date().toLocaleString()
+                };
+
                 if (result.success) {
-                    this.showNotification('Job completed successfully!', 'success');
+                    this.showNotification('Job completed! Click to view results.', 'success');
                 } else {
-                    this.showNotification('Job failed: ' + (result.error || 'Unknown error'), 'error');
+                    this.showNotification('Job failed - see details', 'error');
                 }
             } catch (e) {
+                this.jobResult = {
+                    jobName: jobName,
+                    jobId: id,
+                    success: false,
+                    error: e.message || 'Connection error',
+                    timestamp: new Date().toLocaleString()
+                };
                 this.showNotification('Job execution error', 'error');
             } finally {
                 this.runningJobs[id] = false;
@@ -1229,6 +1316,26 @@ function dashboard() {
         async viewRun(id) {
             const res = await fetch(`/api/runs/${id}`);
             this.selectedRun = await res.json();
+        },
+
+        async viewFullRun(id) {
+            this.jobResult = null;  // Close job result modal
+            await this.viewRun(id);  // Open full run details
+        },
+
+        formatMarkdown(text) {
+            if (!text) return '';
+            // Simple markdown formatting
+            return text
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/`(.+?)`/g, '<code class="bg-gray-800 px-1 rounded">$1</code>')
+                .replace(/^### (.+)$/gm, '<h3 class="text-lg font-bold mt-4 mb-2">$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold mt-4 mb-2">$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>')
+                .replace(/^- (.+)$/gm, '<li class="ml-4">$1</li>')
+                .replace(/\n\n/g, '</p><p class="mb-2">')
+                .replace(/\n/g, '<br>');
         }
     };
 }
