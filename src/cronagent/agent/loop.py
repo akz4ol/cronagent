@@ -246,9 +246,10 @@ class AgentLoop:
         is_error = False
 
         try:
+            logger.info(f"Executing query with prompt: {prompt[:100]}...")
             async for message in query(prompt=effective_prompt, options=options):
-                event = self._process_sdk_message(message)
-                if event:
+                events = self._process_sdk_message(message)
+                for event in events:
                     yield event
 
                     # Track result
@@ -295,48 +296,61 @@ class AgentLoop:
                 },
             )
 
-    def _process_sdk_message(self, message: Any) -> AgentEvent | None:
-        """Process a message from the SDK and convert to AgentEvent."""
-        # Handle different message types from claude-code-sdk
-        msg_type = getattr(message, "type", None)
+    def _process_sdk_message(self, message: Any) -> list[AgentEvent]:
+        """Process a message from the SDK and convert to AgentEvents."""
+        events = []
 
-        if msg_type == "assistant":
+        # Get message class name to determine type
+        msg_class = message.__class__.__name__
+        logger.debug(f"Processing SDK message: class={msg_class}, message={message}")
+
+        if msg_class == "AssistantMessage":
             # Assistant message with content blocks
             content = getattr(message, "content", [])
             for block in content:
-                block_type = getattr(block, "type", None)
-                if block_type == "text":
-                    return AgentEvent(type="text", content=getattr(block, "text", ""))
-                elif block_type == "tool_use":
-                    return AgentEvent(
-                        type="tool_use",
-                        content={
-                            "tool": getattr(block, "name", ""),
-                            "input": getattr(block, "input", {}),
-                        },
+                block_class = block.__class__.__name__
+                if block_class == "TextBlock":
+                    text_content = getattr(block, "text", "")
+                    if text_content:
+                        events.append(AgentEvent(type="text", content=text_content))
+                elif block_class == "ToolUseBlock":
+                    events.append(
+                        AgentEvent(
+                            type="tool_use",
+                            content={
+                                "tool": getattr(block, "name", ""),
+                                "input": getattr(block, "input", {}),
+                            },
+                            metadata={
+                                "tool": getattr(block, "name", ""),
+                                "input": getattr(block, "input", {}),
+                            },
+                        )
                     )
 
-        elif msg_type == "result":
+        elif msg_class == "ResultMessage":
             # Final result message
-            return AgentEvent(
-                type="result",
-                metadata={
-                    "success": not getattr(message, "is_error", False),
-                    "is_error": getattr(message, "is_error", False),
-                    "cost_usd": getattr(message, "total_cost_usd", 0),
-                    "duration_ms": getattr(message, "duration_ms", 0),
-                    "session_id": getattr(message, "session_id", None),
-                },
+            events.append(
+                AgentEvent(
+                    type="result",
+                    metadata={
+                        "success": not getattr(message, "is_error", False),
+                        "is_error": getattr(message, "is_error", False),
+                        "cost_usd": getattr(message, "total_cost_usd", 0),
+                        "duration_ms": getattr(message, "duration_ms", 0),
+                        "session_id": getattr(message, "session_id", None),
+                    },
+                )
             )
 
-        elif msg_type == "system":
+        elif msg_class == "SystemMessage":
             # System message (init, progress, etc.)
             subtype = getattr(message, "subtype", None)
             if subtype == "init":
                 # Capture session ID from init
                 self._session_id = getattr(message, "session_id", None)
 
-        return None
+        return events
 
     async def _emit_event(self, event: AgentEvent) -> None:
         """Emit agent event to event bus."""

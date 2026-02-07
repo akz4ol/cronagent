@@ -44,8 +44,30 @@ class PermissionGrant(BaseModel):
     permissions: list[str]
 
 
+def load_api_config() -> None:
+    """Load API configuration from ~/.cronagent/api.txt if it exists."""
+    config_dir = Path.home() / ".cronagent"
+    api_file = config_dir / "api.txt"
+
+    if api_file.exists():
+        logger.info(f"Loading API config from {api_file}")
+        with open(api_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key and value and key not in os.environ:
+                        os.environ[key] = value
+                        logger.debug(f"Loaded {key} from api.txt")
+
+
 def create_app() -> FastAPI:
     """Create the FastAPI application."""
+    # Load API config from file
+    load_api_config()
+
     app = FastAPI(
         title="CronAgent Dashboard",
         description="Web interface for CronAgent",
@@ -160,7 +182,10 @@ def create_app() -> FastAPI:
     @app.post("/api/chat")
     async def chat(msg: ChatMessage):
         """Send a message to the agent."""
+        logger.info(f"Chat request received: {msg.message[:50]}...")
+
         if not os.environ.get("ANTHROPIC_API_KEY"):
+            logger.error("API key not configured")
             raise HTTPException(400, "API key not configured")
 
         try:
@@ -173,8 +198,13 @@ def create_app() -> FastAPI:
 
             response_parts = []
             tool_uses = []
+            event_count = 0
 
+            logger.info("Starting agent execution...")
             async for event in agent.execute(msg.message):
+                event_count += 1
+                logger.info(f"Received event #{event_count}: type={event.type}, content_preview={str(event.content)[:100] if event.content else 'None'}")
+
                 if event.type == "text":
                     response_parts.append(event.content)
                 elif event.type == "tool_use":
@@ -189,6 +219,8 @@ def create_app() -> FastAPI:
                     "event": event.type,
                     "content": event.content if hasattr(event, 'content') else None,
                 })
+
+            logger.info(f"Agent execution complete. Events: {event_count}, Response parts: {len(response_parts)}")
 
             return {
                 "response": "".join(response_parts),

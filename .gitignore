@@ -68,3 +68,5 @@ chroma/
 
 # CronAgent
 .cronagent/
+api.txt
+*.txt.bak

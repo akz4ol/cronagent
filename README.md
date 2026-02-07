@@ -332,7 +332,7 @@ memory:
 - [x] Multi-channel notifications
 - [x] Docker deployment
 - [x] Simple text-based config
-- [ ] Web dashboard
+- [x] Web dashboard
 - [ ] GitHub Actions integration
 - [ ] Multi-agent orchestration
 
