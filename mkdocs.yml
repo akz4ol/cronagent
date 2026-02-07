@@ -1,0 +1,86 @@
+site_name: CronAgent
+site_url: https://cronagent.dev
+site_description: Autonomous AI Agents on Autopilot - Schedule Claude-powered tasks
+site_author: CronAgent Team
+repo_url: https://github.com/cronagent/cronagent
+repo_name: cronagent/cronagent
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Examples: examples.md
+  - Guides:
+      - Channels: guides/channels.md
+      - Docker Deployment: guides/docker.md
+      - Production: guides/production.md
+  - API Reference:
+      - Overview: api/index.md
+      - Agent: api/agent.md
+      - Scheduler: api/scheduler.md
+      - Channels: api/channels.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/cronagent/cronagent
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/cronagent
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/cronagent
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+
+copyright: Copyright &copy; 2026 CronAgent Contributors

@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cronagent"
+version = "0.1.0"
+description = "Autonomous agent system with Claude SDK for scheduled task execution"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Your Name", email = "your@email.com" }
+]
+keywords = [
+    "ai", "agent", "claude", "automation", "cron", "scheduler", "llm"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "claude-code-sdk>=0.0.20",
+    "apscheduler>=3.10.0",
+    "sqlalchemy>=2.0.0",
+    "aiosqlite>=0.19.0",
+    "chromadb>=0.4.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "aiohttp>=3.9.0",
+    "PyGithub>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+telegram = [
+    "python-telegram-bot>=20.0",
+]
+slack = [
+    "slack-bolt>=1.18.0",
+]
+discord = [
+    "discord.py>=2.0",
+]
+postgres = [
+    "asyncpg>=0.29.0",
+    "pgvector>=0.2.0",
+]
+redis = [
+    "redis>=5.0.0",
+]
+all = [
+    "cronagent[dev,telegram,slack,discord,postgres,redis]",
+]
+
+[project.scripts]
+cronagent = "cronagent.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourname/cronagent"
+Documentation = "https://cronagent.readthedocs.io"
+Repository = "https://github.com/yourname/cronagent"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cronagent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W", "UP"]

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 80">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Clock icon -->
+  <circle cx="40" cy="40" r="30" fill="none" stroke="url(#gradient)" stroke-width="4"/>
+  <line x1="40" y1="40" x2="40" y2="22" stroke="url(#gradient)" stroke-width="3" stroke-linecap="round"/>
+  <line x1="40" y1="40" x2="52" y2="40" stroke="url(#gradient)" stroke-width="3" stroke-linecap="round"/>
+  <!-- Robot/AI indicator -->
+  <circle cx="60" cy="20" r="8" fill="url(#gradient)"/>
+  <rect x="57" y="14" width="6" height="4" rx="1" fill="white"/>
+  <!-- Text -->
+  <text x="85" y="50" font-family="Inter, -apple-system, sans-serif" font-size="36" font-weight="700" fill="#1f2937">
+    Cron<tspan fill="url(#gradient)">Agent</tspan>
+  </text>
+</svg>

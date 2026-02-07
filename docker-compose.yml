@@ -1,0 +1,254 @@
+# CronAgent Docker Compose Configuration
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose --profile production up -d
+#   With Redis:   docker compose --profile redis up
+
+services:
+  # ============================================================
+  # Main CronAgent Service
+  # ============================================================
+  cronagent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cronagent:latest
+    container_name: cronagent
+    restart: unless-stopped
+
+    # Environment variables
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TZ=${TZ:-UTC}
+      # Database configuration
+      - CRONAGENT_MEMORY__STORAGE_TYPE=sqlite
+      - CRONAGENT_MEMORY__SQLITE_PATH=/data/sessions.db
+      - CRONAGENT_MEMORY__CHROMADB_PATH=/data/knowledge
+      - CRONAGENT_SCHEDULER__JOB_STORE_URL=sqlite:////data/jobs.db
+
+    # Persistent volumes
+    volumes:
+      - cronagent-data:/data
+      - ./config:/config:ro
+      - ./skills:/app/skills:ro
+
+    # Webhook port
+    ports:
+      - "${CRONAGENT_PORT:-8080}:8080"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "cronagent", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================
+  # PostgreSQL (Production Profile)
+  # ============================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cronagent-postgres
+    profiles:
+      - production
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cronagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-cronagent}
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cronagent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  # ============================================================
+  # Redis (Optional - for distributed job queue)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: cronagent-redis
+    profiles:
+      - redis
+      - production
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    volumes:
+      - redis-data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ============================================================
+  # CronAgent Production (with PostgreSQL)
+  # ============================================================
+  cronagent-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cronagent:latest
+    container_name: cronagent-prod
+    profiles:
+      - production
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TZ=${TZ:-UTC}
+      # PostgreSQL configuration
+      - CRONAGENT_MEMORY__STORAGE_TYPE=postgresql
+      - CRONAGENT_MEMORY__POSTGRES_URL=postgresql://${POSTGRES_USER:-cronagent}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cronagent}
+      - CRONAGENT_MEMORY__KNOWLEDGE_STORE=pgvector
+      # Redis for job queue
+      - CRONAGENT_SCHEDULER__JOB_STORE_URL=redis://redis:6379/0
+
+    volumes:
+      - ./config:/config:ro
+      - ./skills:/app/skills:ro
+      - cronagent-logs:/var/log/cronagent
+
+    ports:
+      - "${CRONAGENT_PORT:-8080}:8080"
+
+    healthcheck:
+      test: ["CMD", "cronagent", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 1G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================================
+  # Monitoring (Production Profile)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cronagent-prometheus
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    ports:
+      - "9090:9090"
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cronagent-grafana
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+
+    ports:
+      - "3000:3000"
+
+# ============================================================
+# Volumes
+# ============================================================
+volumes:
+  cronagent-data:
+    driver: local
+  cronagent-logs:
+    driver: local
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  default:
+    name: cronagent-network
+    driver: bridge

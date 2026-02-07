@@ -1,0 +1,50 @@
+# CronAgent Local Development Configuration
+# For running locally without Docker
+
+agent:
+  model: "claude-sonnet-4-20250514"
+  max_turns: 50
+  permission_mode: "acceptEdits"
+  working_directory: "."
+
+scheduler:
+  job_store_url: "sqlite:///~/.cronagent/jobs.db"
+  timezone: "UTC"
+  max_concurrent_jobs: 3
+
+memory:
+  storage_type: "sqlite"
+  sqlite_path: "~/.cronagent/sessions.db"
+  enable_knowledge_base: true
+  knowledge_store: "chromadb"
+  chromadb_path: "~/.cronagent/knowledge"
+
+channels:
+  cli:
+    enabled: true
+    prompt: "cronagent> "
+
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []
+
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+
+  discord:
+    enabled: false
+    bot_token: "${DISCORD_BOT_TOKEN}"
+
+  webhook:
+    enabled: false
+    port: 8080
+    path: "/webhook"
+
+notifications:
+  default_channels: ["console"]
+  on_job_failure: true
+
+log_level: "DEBUG"
+skills_dir: "~/.cronagent/skills"

@@ -1,0 +1,120 @@
+# CronAgent Server Configuration
+# For production deployment with Docker
+#
+# Environment variables (from docker-compose or .env):
+#   Required:
+#     - ANTHROPIC_API_KEY: Claude API key
+#   Optional:
+#     - GITHUB_TOKEN: GitHub API access
+#     - SLACK_WEBHOOK_URL: Slack notifications
+#     - DISCORD_WEBHOOK_URL: Discord notifications
+#     - TELEGRAM_BOT_TOKEN: Telegram bot
+#     - POSTGRES_PASSWORD: PostgreSQL password (production)
+
+agent:
+  model: "claude-sonnet-4-20250514"
+  max_turns: 100
+  max_tokens: 16384
+  permission_mode: "acceptEdits"
+  system_prompt: |
+    You are CronAgent, an autonomous agent running scheduled tasks.
+    Be concise and efficient. Focus on completing tasks reliably.
+  working_directory: "/app"
+
+scheduler:
+  # SQLite for simple deployments
+  job_store_url: "sqlite:////data/jobs.db"
+  # PostgreSQL for production (uncomment):
+  # job_store_url: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+  timezone: "UTC"
+  misfire_grace_time: 3600
+  max_workers: 10
+  max_concurrent_jobs: 5
+
+memory:
+  storage_type: "sqlite"
+  sqlite_path: "/data/sessions.db"
+  # PostgreSQL for production (uncomment):
+  # storage_type: "postgresql"
+  # postgres_url: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+  max_session_age_days: 90
+  enable_knowledge_base: true
+  knowledge_store: "chromadb"
+  chromadb_path: "/data/knowledge"
+  # pgvector for production (uncomment):
+  # knowledge_store: "pgvector"
+
+channels:
+  cli:
+    enabled: false  # Disabled in server mode
+
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []  # Add user IDs to restrict access
+
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+    signing_secret: "${SLACK_SIGNING_SECRET}"
+    app_token: "${SLACK_APP_TOKEN}"
+    socket_mode: true
+    allowed_users: []
+    allowed_channels: []
+
+  discord:
+    enabled: false
+    bot_token: "${DISCORD_BOT_TOKEN}"
+    application_id: "${DISCORD_APP_ID}"
+    allowed_guilds: []
+    allowed_roles: []
+
+  webhook:
+    enabled: true
+    port: 8080
+    path: "/webhook"
+    secret: "${WEBHOOK_SECRET}"
+    require_signature: true
+
+notifications:
+  default_channels:
+    - "console"
+    # - "slack"
+    # - "discord"
+  on_job_start: false
+  on_job_complete: true
+  on_job_failure: true
+  slack_webhook_url: "${SLACK_WEBHOOK_URL}"
+  discord_webhook_url: "${DISCORD_WEBHOOK_URL}"
+  dedupe_window_minutes: 5
+  rate_limit_per_minute: 30
+
+log_level: "INFO"
+skills_dir: "/app/skills"
+
+# Example scheduled jobs
+# Uncomment and customize as needed
+# jobs:
+#   - id: "daily-report"
+#     name: "Daily Status Report"
+#     cron: "0 9 * * *"
+#     prompt: |
+#       Generate a daily status report:
+#       1. Check system health
+#       2. Review recent job runs
+#       3. Summarize any issues
+#     notifications:
+#       on_success: true
+#       channels: ["slack"]
+#
+#   - id: "weekly-security-scan"
+#     name: "Weekly Security Scan"
+#     cron: "0 2 * * 0"
+#     prompt: |
+#       Perform a security audit:
+#       1. Check for dependency vulnerabilities
+#       2. Scan for exposed secrets
+#       3. Review access logs
+#     notifications:
+#       on_failure: true
+#       channels: ["slack", "discord"]
