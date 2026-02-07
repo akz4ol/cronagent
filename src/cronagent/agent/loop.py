@@ -227,9 +227,10 @@ class AgentLoop:
             effective_prompt = await self._build_enhanced_prompt(prompt)
 
         # Determine execution mode: CLI (OAuth) vs SDK (API key)
-        # Prefer CLI mode when available (uses subscription, no API costs)
+        # For now, prefer SDK mode if API key is set (more reliable)
+        api_key_set = bool(os.environ.get("ANTHROPIC_API_KEY"))
         cli_available = shutil.which("claude") is not None
-        use_cli = self.config.use_cli and cli_available
+        use_cli = self.config.use_cli and cli_available and not api_key_set
 
         # Execute query
         result_text = ""
@@ -336,26 +337,40 @@ class AgentLoop:
         if self.config.max_turns:
             cmd.extend(["--max-turns", str(self.config.max_turns)])
 
-        logger.info(f"Running CLI command: {cmd}")
+        print(f"[DEBUG] Running CLI command: {' '.join(cmd)}", flush=True)
 
         try:
+            # Pass through environment for OAuth credentials
+            # But filter out SUDO_* vars that might confuse CLI
+            # Ensure HOME is set correctly for auth token lookup
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SUDO_")}
+            env["HOME"] = os.path.expanduser("~")
+            print(f"[DEBUG] Using HOME={env.get('HOME')}", flush=True)
+
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
                 cwd=self.config.working_directory,
+                env=env,  # Include full environment for OAuth
             )
+            print(f"[DEBUG] CLI process started, PID: {process.pid}", flush=True)
 
             session_id = None
             result_text = ""
+            all_output = []
+
+            print(f"[DEBUG] Starting CLI read loop", flush=True)
 
             # Read stdout line by line
             async for line_bytes in process.stdout:
                 line = line_bytes.decode().strip()
+                all_output.append(line)
+                print(f"[DEBUG] CLI line: {line[:300]}", flush=True)
                 if not line:
                     continue
 
-                logger.debug(f"CLI output: {line[:200]}")
+                logger.info(f"CLI output line: {line[:500]}")
 
                 try:
                     data = json.loads(line)
@@ -405,6 +420,10 @@ class AgentLoop:
 
             await process.wait()
             logger.info(f"CLI process completed with return code: {process.returncode}")
+            logger.info(f"CLI total output lines: {len(all_output)}")
+            if all_output:
+                logger.info(f"CLI first line: {all_output[0][:200] if all_output[0] else 'empty'}")
+                logger.info(f"CLI last line: {all_output[-1][:200] if all_output[-1] else 'empty'}")
 
         except Exception as e:
             logger.error(f"CLI execution error: {e}", exc_info=True)
