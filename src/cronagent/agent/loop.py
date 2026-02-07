@@ -1,15 +1,22 @@
 """
-Main agent loop wrapping Claude SDK.
+Main agent loop wrapping Claude SDK or CLI.
 
-This is the core integration point with the Claude Agent SDK,
+This is the core integration point with Claude Code,
 managing the conversation lifecycle, tool execution, and event emission.
 Integrates with the memory system for session persistence and context retrieval.
+
+Supports two modes:
+- SDK mode: Uses ANTHROPIC_API_KEY (costs money per API call)
+- CLI mode: Uses Claude Code CLI with OAuth (uses your subscription)
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -47,6 +54,10 @@ class AgentLoopConfig:
     max_tokens: int = 8192
     temperature: float | None = None
     env: dict[str, str] = field(default_factory=dict)
+    # Use CLI mode (OAuth) instead of SDK (API key)
+    # If True, runs `claude` CLI directly using your subscription
+    # If False or API key is set, uses SDK with API billing
+    use_cli: bool = True  # Default to CLI/OAuth mode
 
 
 @dataclass
@@ -200,18 +211,6 @@ class AgentLoop:
         Yields:
             AgentEvent objects
         """
-        try:
-            # Import Claude SDK here to allow graceful degradation if not installed
-            from claude_code_sdk import ClaudeCodeOptions, query
-
-        except ImportError:
-            logger.error("claude-code-sdk not installed. Install with: pip install claude-code-sdk")
-            yield AgentEvent(
-                type="error",
-                content="Claude SDK not installed. Install with: pip install claude-code-sdk",
-            )
-            return
-
         # Persist user message if session active
         await self._persist_message("user", prompt)
 
@@ -227,17 +226,8 @@ class AgentLoop:
         if use_memory_context and self.context_builder and self._project_id:
             effective_prompt = await self._build_enhanced_prompt(prompt)
 
-        # Build options
-        options = ClaudeCodeOptions(
-            system_prompt=system_prompt or None,
-            allowed_tools=self._collect_allowed_tools(),
-            permission_mode=self.config.permission_mode,
-            cwd=self.config.working_directory,
-            max_turns=self.config.max_turns,
-            model=self.config.model,
-            # MCP servers from skills
-            # mcp_servers=self._get_mcp_servers(),
-        )
+        # Determine execution mode: CLI (OAuth) vs SDK (API key)
+        use_cli = self.config.use_cli and not os.environ.get("ANTHROPIC_API_KEY")
 
         # Execute query
         result_text = ""
@@ -246,13 +236,26 @@ class AgentLoop:
         is_error = False
 
         try:
-            logger.info(f"Executing query with prompt: {prompt[:100]}...")
-            async for message in query(prompt=effective_prompt, options=options):
-                events = self._process_sdk_message(message)
-                for event in events:
+            logger.info(f"Executing query with prompt: {prompt[:100]}... (CLI mode: {use_cli})")
+
+            if use_cli:
+                # CLI mode - use OAuth via `claude` command
+                async for event in self._execute_via_cli(effective_prompt, system_prompt):
                     yield event
 
-                    # Track result
+                    if event.type == "text":
+                        result_text += event.content
+                    elif event.type == "result":
+                        session_id = event.metadata.get("session_id")
+                        is_error = event.metadata.get("is_error", False)
+
+                    if self.event_bus:
+                        await self._emit_event(event)
+            else:
+                # SDK mode - use API key
+                async for event in self._execute_via_sdk(effective_prompt, system_prompt):
+                    yield event
+
                     if event.type == "text":
                         result_text += event.content
                     elif event.type == "result":
@@ -260,7 +263,6 @@ class AgentLoop:
                         session_id = event.metadata.get("session_id")
                         is_error = event.metadata.get("is_error", False)
 
-                    # Emit to event bus
                     if self.event_bus:
                         await self._emit_event(event)
 
@@ -295,6 +297,134 @@ class AgentLoop:
                     "result_length": len(result_text),
                 },
             )
+
+    async def _execute_via_cli(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """
+        Execute via Claude Code CLI (uses OAuth - your subscription).
+
+        Runs `claude -p "prompt" --output-format stream-json` and parses output.
+        """
+        # Check if claude CLI is available
+        claude_path = shutil.which("claude")
+        if not claude_path:
+            yield AgentEvent(
+                type="error",
+                content="Claude Code CLI not found. Install from: https://claude.ai/code",
+            )
+            return
+
+        # Build command
+        cmd = [
+            claude_path,
+            "-p", prompt,
+            "--output-format", "stream-json",
+            "--verbose",
+        ]
+
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
+
+        if self.config.permission_mode == "acceptEdits":
+            cmd.append("--dangerously-skip-permissions")
+
+        if self.config.max_turns:
+            cmd.extend(["--max-turns", str(self.config.max_turns)])
+
+        logger.info(f"Running CLI: {' '.join(cmd[:4])}...")
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.config.working_directory,
+            )
+
+            session_id = None
+            buffer = ""
+
+            # Read stdout line by line
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+
+                try:
+                    data = json.loads(line.decode().strip())
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = data.get("type")
+
+                if msg_type == "system" and data.get("subtype") == "init":
+                    session_id = data.get("session_id")
+
+                elif msg_type == "assistant":
+                    # Text content from assistant
+                    content = data.get("message", {}).get("content", [])
+                    for block in content:
+                        if block.get("type") == "text":
+                            yield AgentEvent(type="text", content=block.get("text", ""))
+                        elif block.get("type") == "tool_use":
+                            yield AgentEvent(
+                                type="tool_use",
+                                content={"tool": block.get("name"), "input": block.get("input")},
+                                metadata={"tool": block.get("name"), "input": block.get("input")},
+                            )
+
+                elif msg_type == "result":
+                    yield AgentEvent(
+                        type="result",
+                        metadata={
+                            "success": not data.get("is_error", False),
+                            "is_error": data.get("is_error", False),
+                            "session_id": session_id,
+                            "duration_ms": data.get("duration_ms", 0),
+                            # No cost for CLI mode - uses subscription
+                            "cost_usd": 0,
+                        },
+                    )
+
+            await process.wait()
+
+        except Exception as e:
+            logger.error(f"CLI execution error: {e}", exc_info=True)
+            yield AgentEvent(type="error", content=str(e))
+
+    async def _execute_via_sdk(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """
+        Execute via Claude Code SDK (uses API key - pay per call).
+        """
+        try:
+            from claude_code_sdk import ClaudeCodeOptions, query
+        except ImportError:
+            yield AgentEvent(
+                type="error",
+                content="claude-code-sdk not installed. Install with: pip install claude-code-sdk",
+            )
+            return
+
+        options = ClaudeCodeOptions(
+            system_prompt=system_prompt or None,
+            allowed_tools=self._collect_allowed_tools(),
+            permission_mode=self.config.permission_mode,
+            cwd=self.config.working_directory,
+            max_turns=self.config.max_turns,
+            model=self.config.model,
+        )
+
+        async for message in query(prompt=prompt, options=options):
+            events = self._process_sdk_message(message)
+            for event in events:
+                yield event
 
     def _process_sdk_message(self, message: Any) -> list[AgentEvent]:
         """Process a message from the SDK and convert to AgentEvents."""

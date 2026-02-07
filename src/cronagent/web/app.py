@@ -94,10 +94,14 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     async def get_status():
         """Get current system status."""
+        import shutil
         global PERMISSIONS_GRANTED
 
         # Check if API key is set
         api_key_set = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+        # Check if Claude CLI is available (for OAuth mode)
+        cli_available = shutil.which("claude") is not None
 
         # Check permissions file
         config_dir = Path.home() / ".cronagent"
@@ -105,9 +109,15 @@ def create_app() -> FastAPI:
         if perm_file.exists():
             PERMISSIONS_GRANTED = True
 
+        # Ready if: CLI available (OAuth) OR API key set
+        ready = cli_available or api_key_set
+
         return {
             "status": "running",
             "api_key_configured": api_key_set,
+            "cli_available": cli_available,
+            "mode": "cli" if (cli_available and not api_key_set) else "sdk",
+            "ready": ready,
             "permissions_granted": PERMISSIONS_GRANTED,
             "timestamp": datetime.now().isoformat(),
         }
@@ -719,18 +729,36 @@ def get_dashboard_html() -> str:
                 <p class="text-gray-400 mt-2">Let's get you set up in 30 seconds</p>
             </div>
 
-            <!-- Step 1: API Key -->
+            <!-- Step 1: API Key or CLI Mode -->
             <div x-show="setupStep === 1">
-                <label class="block text-sm font-medium mb-2">Anthropic API Key</label>
+                <!-- CLI Mode Available -->
+                <div x-show="status.cli_available" class="mb-6 p-4 bg-green-900/30 border border-green-700 rounded-lg">
+                    <div class="flex items-center gap-2 text-green-400 font-medium mb-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                        Claude Code CLI detected!
+                    </div>
+                    <p class="text-sm text-gray-300 mb-3">Use your existing Claude subscription - no API costs.</p>
+                    <button @click="skipApiKey()"
+                        class="w-full bg-green-600 hover:bg-green-700 rounded-lg py-3 font-medium transition">
+                        Use CLI Mode (Recommended)
+                    </button>
+                </div>
+
+                <div x-show="status.cli_available" class="text-center text-gray-500 text-sm mb-4">— or enter API key for SDK mode —</div>
+
+                <label class="block text-sm font-medium mb-2">Anthropic API Key <span x-show="status.cli_available" class="text-gray-500">(optional)</span></label>
                 <input type="password" x-model="apiKey"
                     class="w-full bg-gray-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
                     placeholder="sk-ant-...">
                 <p class="text-xs text-gray-500 mt-2">
                     Get your key from <a href="https://console.anthropic.com" target="_blank" class="text-indigo-400 hover:underline">console.anthropic.com</a>
+                    <span x-show="!status.cli_available" class="text-yellow-400"> (required - CLI not detected)</span>
                 </p>
                 <button @click="saveApiKey()" :disabled="!apiKey"
                     class="w-full mt-4 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded-lg py-3 font-medium transition">
-                    Continue
+                    Use API Key
                 </button>
             </div>
 
@@ -812,9 +840,10 @@ def get_dashboard_html() -> str:
             <!-- Status -->
             <div class="p-4 border-t border-gray-700">
                 <div class="flex items-center gap-2 text-sm">
-                    <span class="w-2 h-2 rounded-full" :class="status.api_key_configured ? 'bg-green-500' : 'bg-red-500'"></span>
-                    <span x-text="status.api_key_configured ? 'Connected' : 'Not configured'"></span>
+                    <span class="w-2 h-2 rounded-full" :class="status.ready ? 'bg-green-500' : 'bg-red-500'"></span>
+                    <span x-text="status.ready ? (status.mode === 'cli' ? 'CLI Mode (Free)' : 'API Mode') : 'Not configured'"></span>
                 </div>
+                <div x-show="status.mode === 'cli'" class="text-xs text-gray-500 mt-1">Using your subscription</div>
             </div>
         </div>
 
@@ -1137,7 +1166,9 @@ function dashboard() {
             const res = await fetch('/api/status');
             this.status = await res.json();
 
-            if (!this.status.api_key_configured) {
+            // If CLI is available OR API key is set, we're ready
+            if (!this.status.ready) {
+                // Need API key (CLI not available)
                 this.showSetup = true;
                 this.setupStep = 1;
             } else if (!this.status.permissions_granted) {
@@ -1152,6 +1183,11 @@ function dashboard() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: this.apiKey })
             });
+            this.setupStep = 2;
+        },
+
+        skipApiKey() {
+            // Skip API key setup when CLI is available
             this.setupStep = 2;
         },
 
