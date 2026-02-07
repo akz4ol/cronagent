@@ -471,6 +471,30 @@ async def _show_job_status(config: CronAgentConfig) -> None:
         pass
 
 
+@main.command()
+@click.pass_context
+def reload(ctx: click.Context) -> None:
+    """Reload configuration from api.txt and config files."""
+    config_dir = Path.home() / ".cronagent"
+    api_file = config_dir / "api.txt"
+
+    if api_file.exists():
+        # Load environment variables from api.txt
+        with open(api_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+                    console.print(f"  [green]Loaded[/green] {key.strip()}")
+
+        console.print("\n[green]Configuration reloaded![/green]")
+        console.print("Note: Running daemons need to be restarted to pick up changes.")
+    else:
+        console.print(f"[yellow]No api.txt found at {api_file}[/yellow]")
+        console.print("Run 'cronagent init' to create one.")
+
+
 # ============================================================
 # Cron command group
 # ============================================================

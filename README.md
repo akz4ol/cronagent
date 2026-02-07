@@ -8,26 +8,92 @@
 
 ### Autonomous AI Agents on Autopilot
 
-**Schedule Claude-powered tasks. Automate workflows. Deploy self-managing AI agents.**
+**Schedule Claude-powered tasks. Automate workflows. Deploy self-managing agents.**
 
 *"Set it. Forget it. Let Claude handle the rest."*
 
 [![PyPI version](https://img.shields.io/pypi/v/cronagent.svg)](https://pypi.org/project/cronagent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Downloads](https://img.shields.io/pypi/dm/cronagent.svg)](https://pypi.org/project/cronagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker)](https://hub.docker.com/r/cronagent/cronagent)
 [![Discord](https://img.shields.io/discord/1234567890?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/cronagent)
 
-[Quick Start](#-quick-start) &bull; [Documentation](https://cronagent.dev/docs) &bull; [Examples](#-examples) &bull; [Discord](https://discord.gg/cronagent) &bull; [Blog](https://cronagent.dev/blog)
+[One-Line Setup](#-one-line-setup) &bull; [Documentation](https://akz4ol.github.io/cronagent) &bull; [Examples](#-examples) &bull; [Discord](https://discord.gg/cronagent)
 
 ---
 
 </div>
 
+## ⚡ One-Line Setup
+
+### Option 1: Python (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akz4ol/cronagent/main/setup.sh | bash
+```
+
+### Option 2: Docker
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akz4ol/cronagent/main/docker-setup.sh | bash
+```
+
+### Option 3: pip
+
+```bash
+pip install cronagent && cronagent init
+```
+
+**That's it!** After setup, just edit `~/.cronagent/api.txt` to add your API key.
+
+---
+
+## 🔑 Simple API Configuration
+
+All your API keys go in one simple text file: `~/.cronagent/api.txt`
+
+```bash
+# Just edit this file - no complicated YAML!
+nano ~/.cronagent/api.txt
+```
+
+```ini
+# ~/.cronagent/api.txt
+# Add your keys below (get Anthropic key from https://console.anthropic.com)
+
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+TELEGRAM_BOT_TOKEN=123456:ABC
+SLACK_WEBHOOK_URL=https://hooks.slack.com/xxx
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx
+GITHUB_TOKEN=ghp_xxxxx
+```
+
+**To reconfigure anytime:**
+```bash
+nano ~/.cronagent/api.txt   # Edit keys
+cronagent reload            # Apply changes
+```
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Chat with the agent
+cronagent agent
+
+# Run a single task
+cronagent run "Analyze this codebase"
+
+# Start scheduled tasks
+cronagent daemon
+```
+
+---
+
 ## What is CronAgent?
 
-CronAgent is a **lightweight autonomous agent scheduler** (~5,000 lines) that combines the power of [Claude](https://anthropic.com/claude) with cron-like scheduling. Unlike complex agent frameworks with 400k+ lines, CronAgent is **readable, hackable, and production-ready**.
+CronAgent is a **lightweight autonomous agent scheduler** (~5,000 lines) that combines [Claude](https://anthropic.com/claude) with cron-like scheduling.
 
 <div align="center">
 <table>
@@ -36,16 +102,12 @@ CronAgent is a **lightweight autonomous agent scheduler** (~5,000 lines) that co
 
 **Scheduled Tasks**
 
-<img src="docs/assets/demo-schedule.gif" width="200" alt="Scheduling demo">
-
 Cron expressions, intervals, dependencies
 
 </td>
 <td align="center" width="25%">
 
 **Multi-Channel**
-
-<img src="docs/assets/demo-channels.gif" width="200" alt="Channels demo">
 
 Telegram, Slack, Discord, Webhooks
 
@@ -54,16 +116,12 @@ Telegram, Slack, Discord, Webhooks
 
 **Memory**
 
-<img src="docs/assets/demo-memory.gif" width="200" alt="Memory demo">
-
 Cross-session learning & context
 
 </td>
 <td align="center" width="25%">
 
 **Notifications**
-
-<img src="docs/assets/demo-notify.gif" width="200" alt="Notifications demo">
 
 Smart alerts with deduplication
 
@@ -80,378 +138,218 @@ Smart alerts with deduplication
 | Rigid, brittle scripts | Adaptive, self-correcting AI |
 | No memory between runs | Cross-session learning |
 | Manual error handling | Intelligent retry with reasoning |
-| Single-channel output | Multi-channel notifications |
 
 <details>
-<summary><b>Compared to other agent frameworks</b></summary>
+<summary><b>Compared to other frameworks</b></summary>
 
-| Framework | Lines of Code | Learning Curve | Production Ready |
-|-----------|--------------|----------------|------------------|
-| CronAgent | ~5,000 | Low | Yes |
-| OpenClaw | 430,000+ | High | Yes |
-| LangChain | 200,000+ | Medium | Yes |
-| AutoGPT | 50,000+ | Medium | Experimental |
+| Framework | Lines of Code | Complexity |
+|-----------|--------------|------------|
+| CronAgent | ~5,000 | Simple |
+| OpenClaw | 430,000+ | Complex |
+| LangChain | 200,000+ | Medium |
 
-CronAgent is intentionally minimal. You can read the entire codebase in an afternoon.
+CronAgent is intentionally minimal. Read the entire codebase in an afternoon.
 
 </details>
 
-## Quick Start
+---
 
-### Installation
+## 📋 Examples
+
+### Schedule a Daily Task
 
 ```bash
-# From PyPI
-pip install cronagent
-
-# With all integrations (Telegram, Slack, Discord)
-pip install "cronagent[all]"
-
-# From source
-git clone https://github.com/cronagent/cronagent.git
-cd cronagent && pip install -e ".[all]"
+# Add a job via CLI
+cronagent cron add --name "Daily Report" --cron "0 9 * * *" --prompt "Generate a daily summary"
 ```
 
-### Setup
+### Or use a simple jobs file
 
-```bash
-# Initialize configuration
-cronagent init
+Create `~/.cronagent/jobs.txt`:
 
-# Set your API key
-export ANTHROPIC_API_KEY=your-key-here
-```
+```ini
+# Simple job definitions - one per section
+# ~/.cronagent/jobs.txt
 
-### Run Your First Agent
+[daily-security]
+name = Daily Security Scan
+cron = 0 6 * * *
+prompt = Scan for vulnerabilities and exposed secrets
+notify = slack
 
-```bash
-# Interactive mode
-cronagent agent
-
-# Run a single task
-cronagent run "Analyze this repository and summarize the architecture"
-
-# Start the scheduler daemon
-cronagent daemon
+[weekly-report]
+name = Weekly Report
+cron = 0 10 * * MON
+prompt = Generate a weekly development summary
+notify = slack, email
 ```
 
 <details>
-<summary><b>Docker deployment</b></summary>
+<summary><b>More examples</b></summary>
+
+### PR Reviewer
+
+```ini
+[pr-review]
+name = AI PR Reviewer
+trigger = webhook
+prompt = Review this PR for bugs and improvements
+notify = github
+```
+
+### Cost Analysis
+
+```ini
+[cost-analysis]
+name = Weekly Cost Analysis
+cron = 0 9 * * MON
+prompt = Analyze cloud spending and suggest optimizations
+notify = slack
+```
+
+</details>
+
+---
+
+## 🛠 CLI Commands
 
 ```bash
-# Quick start
-docker run -d \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+# Core
+cronagent agent              # Interactive chat
+cronagent run "prompt"       # Single task
+cronagent daemon             # Start scheduler
+cronagent status             # Show status
+cronagent reload             # Reload config
+
+# Jobs
+cronagent cron list          # List jobs
+cronagent cron add           # Add job (interactive)
+cronagent cron remove <id>   # Remove job
+cronagent cron trigger <id>  # Run job now
+cronagent cron history       # View history
+```
+
+---
+
+## 🐳 Docker Deployment
+
+### Quick Start
+
+```bash
+docker run -d --name cronagent \
+  --env-file ~/.cronagent/api.txt \
   -v cronagent-data:/data \
-  cronagent/cronagent:latest
+  ghcr.io/akz4ol/cronagent:latest
+```
 
-# With Docker Compose
-docker compose up -d
+### Docker Compose
 
-# Production (with PostgreSQL + Redis)
+```bash
+cd ~/.cronagent && docker compose up -d
+```
+
+### Production (with PostgreSQL + Redis)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akz4ol/cronagent/main/docker-compose.yml > docker-compose.yml
 docker compose --profile production up -d
 ```
 
-</details>
+---
 
-## Features
+## 📁 File Locations
 
-### Core Capabilities
+| File | Purpose |
+|------|---------|
+| `~/.cronagent/api.txt` | API keys (simple key=value) |
+| `~/.cronagent/jobs.txt` | Scheduled jobs (optional) |
+| `~/.cronagent/config.yaml` | Advanced config (optional) |
+| `~/.cronagent/sessions.db` | Session memory |
 
-- **Natural Language Scheduling** - Schedule tasks in plain English
-- **Multi-Channel Communication** - Telegram, Slack, Discord, webhooks
-- **Session Memory** - Agents remember context across runs
-- **Knowledge Base** - Vector search over your codebase
-- **Credential Passthrough** - GitHub, AWS, and other CLI credentials
+---
 
-### Scheduling Options
+## 🔧 Advanced Configuration
+
+For power users, full YAML config is available:
+
+<details>
+<summary><b>~/.cronagent/config.yaml</b></summary>
 
 ```yaml
-# Cron expressions
-schedule: "0 9 * * *"          # Every day at 9am
-
-# Interval scheduling
-schedule: "every 15 minutes"    # Run every 15 minutes
-
-# Dependent tasks
-depends_on: "security-scan"     # Run after another job completes
-```
-
-### Built-in Integrations
-
-| Channel | Status | Description |
-|---------|--------|-------------|
-| CLI | Ready | Interactive command-line interface |
-| Telegram | Ready | Bot integration with user whitelisting |
-| Slack | Ready | Slack Bolt app + webhooks |
-| Discord | Ready | Discord.py bot support |
-| Webhooks | Ready | HTTP endpoints for any integration |
-
-## Examples
-
-<details>
-<summary><b>Daily Security Scan</b></summary>
-
-```yaml
-jobs:
-  - id: daily-security-scan
-    name: "Daily Security Audit"
-    cron: "0 6 * * *"
-    prompt: |
-      Perform a comprehensive security analysis:
-      1. Scan for dependency vulnerabilities
-      2. Check for exposed secrets in code
-      3. Review recent commits for security issues
-      4. Generate a summary report
-    notifications:
-      on_complete: ["slack:#security"]
-```
-
-</details>
-
-<details>
-<summary><b>AI PR Reviewer</b></summary>
-
-```yaml
-jobs:
-  - id: pr-reviewer
-    name: "AI PR Reviewer"
-    trigger: webhook
-    prompt: |
-      Review this pull request:
-      - Check code quality and patterns
-      - Identify potential bugs
-      - Suggest improvements
-      - Verify test coverage
-    notifications:
-      on_complete: ["github:pr-comment"]
-```
-
-</details>
-
-<details>
-<summary><b>Weekly Codebase Report</b></summary>
-
-```yaml
-jobs:
-  - id: weekly-report
-    name: "Weekly Code Health Report"
-    cron: "0 10 * * MON"
-    prompt: |
-      Generate a weekly development report:
-      1. Summarize commits from the past week
-      2. Identify technical debt
-      3. Highlight areas needing attention
-      4. Track progress on open issues
-    notifications:
-      on_complete: ["slack:#engineering"]
-```
-
-</details>
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           CronAgent                                  │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐│
-│   │  Scheduler  │    │   Memory    │    │      Agent Core         ││
-│   │  (APSched)  │───▶│  (SQLite/   │◀───│    (Claude SDK)         ││
-│   │             │    │  Postgres)  │    │                         ││
-│   └─────────────┘    └─────────────┘    └───────────┬─────────────┘│
-│         │                   │                        │              │
-│         ▼                   ▼                        ▼              │
-│   ┌─────────────────────────────────────────────────────────────┐  │
-│   │                       Event Bus                              │  │
-│   │            (Pub/Sub for decoupled communication)             │  │
-│   └─────────────────────────────────────────────────────────────┘  │
-│         │                   │                        │              │
-│         ▼                   ▼                        ▼              │
-│   ┌───────────┐      ┌───────────┐            ┌───────────┐        │
-│   │ Telegram  │      │   Slack   │     ...    │  Webhook  │        │
-│   └───────────┘      └───────────┘            └───────────┘        │
-│                                                                      │
-│                         Channels Layer                               │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-## Everything Built So Far
-
-<details>
-<summary><b>Core Platform</b></summary>
-
-- **Agent Loop** - Claude SDK integration with tool execution
-- **Context Manager** - Conversation and session tracking
-- **Event Bus** - Pub/sub for component communication
-
-</details>
-
-<details>
-<summary><b>Scheduler</b></summary>
-
-- **APScheduler Integration** - Cron, interval, one-time, dependent jobs
-- **Job Store** - SQLite/PostgreSQL persistence
-- **Executor** - Claude prompts, scripts, webhooks, Python functions
-- **Retry Logic** - Exponential backoff with configurable policies
-
-</details>
-
-<details>
-<summary><b>Channels</b></summary>
-
-- **Telegram** - python-telegram-bot integration
-- **Slack** - Slack Bolt + webhooks
-- **Discord** - discord.py bot
-- **CLI** - Rich interactive terminal
-- **Webhooks** - HTTP endpoint handlers
-
-</details>
-
-<details>
-<summary><b>Memory</b></summary>
-
-- **Session Manager** - Create, resume, fork sessions
-- **Message Store** - Full conversation history
-- **Knowledge Base** - ChromaDB/pgvector embeddings
-- **Insight Extraction** - Cross-session learning
-
-</details>
-
-<details>
-<summary><b>Notifications</b></summary>
-
-- **Template System** - Customizable notification formats
-- **Deduplication** - Prevent notification spam
-- **Rate Limiting** - Channel-specific throttling
-- **Multi-Channel** - Route to Slack, Discord, email, etc.
-
-</details>
-
-<details>
-<summary><b>Deployment</b></summary>
-
-- **Docker** - Multi-stage production builds
-- **Docker Compose** - Development and production profiles
-- **PostgreSQL** - Production session storage
-- **Redis** - Distributed job queue (optional)
-- **Monitoring** - Prometheus + Grafana (optional)
-
-</details>
-
-## CLI Reference
-
-```bash
-# Core commands
-cronagent init              # Initialize configuration
-cronagent agent             # Start interactive mode
-cronagent run "prompt"      # Execute single task
-cronagent daemon            # Run scheduler daemon
-cronagent status            # Show system status
-
-# Job management
-cronagent cron list         # List scheduled jobs
-cronagent cron add          # Add new job interactively
-cronagent cron remove <id>  # Remove a job
-cronagent cron trigger <id> # Manually trigger a job
-cronagent cron pause <id>   # Pause a job
-cronagent cron resume <id>  # Resume a paused job
-cronagent cron show <id>    # Show job details
-cronagent cron history      # View execution history
-```
-
-## Configuration
-
-```yaml
-# ~/.cronagent/config.yaml
-
 agent:
   model: "claude-sonnet-4-20250514"
   max_turns: 50
-  permission_mode: "acceptEdits"
 
 scheduler:
-  job_store_url: "sqlite:///~/.cronagent/jobs.db"
   timezone: "UTC"
   max_concurrent_jobs: 5
 
 channels:
   telegram:
     enabled: true
-    token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: ["123456789"]
   slack:
     enabled: true
-    webhook_url: "${SLACK_WEBHOOK_URL}"
+  discord:
+    enabled: true
 
 memory:
   storage_type: "sqlite"
   enable_knowledge_base: true
-
-notifications:
-  default_channels: ["slack"]
-  on_failure: ["slack", "email"]
 ```
 
-## Roadmap
+</details>
 
-- [x] Core agent loop with Claude SDK
-- [x] Session persistence and memory
-- [x] Scheduler with cron/interval support
+---
+
+## 🗺 Roadmap
+
+- [x] Core agent with Claude SDK
+- [x] Session memory
+- [x] Cron scheduler
 - [x] Multi-channel notifications
 - [x] Docker deployment
+- [x] Simple text-based config
 - [ ] Web dashboard
 - [ ] GitHub Actions integration
-- [ ] Workflow builder UI
 - [ ] Multi-agent orchestration
-- [ ] Cloud-hosted version
 
-## Star History
+---
 
-<a href="https://star-history.com/#cronagent/cronagent&Date">
+## ⭐ Star History
+
+<a href="https://star-history.com/#akz4ol/cronagent&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=cronagent/cronagent&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=cronagent/cronagent&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=cronagent/cronagent&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=akz4ol/cronagent&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=akz4ol/cronagent&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=akz4ol/cronagent&type=Date" />
   </picture>
 </a>
 
-## Contributing
+---
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## 🤝 Contributing
 
 ```bash
-# Development setup
-git clone https://github.com/cronagent/cronagent.git
-cd cronagent
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run linting
-ruff check src/ && mypy src/
+git clone https://github.com/akz4ol/cronagent.git
+cd cronagent && pip install -e ".[dev]"
+pytest && ruff check src/
 ```
 
-## Community
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-- [Discord](https://discord.gg/cronagent) - Chat with the community
-- [GitHub Discussions](https://github.com/cronagent/cronagent/discussions) - Ask questions
-- [Twitter](https://twitter.com/cronagent) - Follow for updates
+---
 
-## License
+## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE)
 
 ---
 
 <div align="center">
 
-**Built with [Claude](https://anthropic.com/claude) by Anthropic**
+**Built with [Claude](https://anthropic.com/claude)**
 
-*CronAgent is not affiliated with Anthropic. Claude is a trademark of Anthropic, PBC.*
-
-If CronAgent helps you, consider giving it a star!
+If CronAgent helps you, give it a ⭐!
 
 </div>
